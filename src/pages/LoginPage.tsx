@@ -1,13 +1,15 @@
 import { useState, type FormEvent } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
-import { getErrorMessage } from '@/lib/api';
+import { api, getErrorMessage } from '@/lib/api';
 
 export function LoginPage() {
-  const { user, login, loading } = useAuth();
+  const { user, login, register, loading } = useAuth();
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
   const [email, setEmail] = useState('admin@noteforge.local');
   const [password, setPassword] = useState('Admin123!');
+  const [fullName, setFullName] = useState('');
   const [busy, setBusy] = useState(false);
 
   if (!loading && user) return <Navigate to="/" replace />;
@@ -16,7 +18,15 @@ export function LoginPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await login(email, password);
+      if (mode === 'forgot') {
+        await api.post('/auth/password/forgot', { email });
+        toast.success('Reset token sunucu logunda (dev)');
+      } else if (mode === 'register') {
+        await register(email, password, fullName || email.split('@')[0]);
+        toast.success('Hesap oluşturuldu');
+      } else {
+        await login(email, password);
+      }
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
@@ -32,9 +42,20 @@ export function LoginPage() {
       >
         <h1 className="font-display text-3xl font-bold tracking-tight">NoteForge</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Blok notlar · ilişkili işler · çizim
+          {mode === 'register' ? 'Yeni hesap' : mode === 'forgot' ? 'Şifre sıfırla' : 'Giriş'}
         </p>
-        <label className="mt-6 block text-sm">
+        {mode === 'register' && (
+          <label className="mt-6 block text-sm">
+            Ad
+            <input
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+            />
+          </label>
+        )}
+        <label className={`block text-sm ${mode === 'register' ? 'mt-3' : 'mt-6'}`}>
           E-posta
           <input
             className="mt-1 w-full rounded-lg border px-3 py-2"
@@ -44,25 +65,48 @@ export function LoginPage() {
             required
           />
         </label>
-        <label className="mt-3 block text-sm">
-          Şifre
-          <input
-            className="mt-1 w-full rounded-lg border px-3 py-2"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            required
-          />
-        </label>
+        {mode !== 'forgot' && (
+          <label className="mt-3 block text-sm">
+            Şifre
+            <input
+              className="mt-1 w-full rounded-lg border px-3 py-2"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              type="password"
+              required
+              minLength={6}
+            />
+          </label>
+        )}
         <button
           type="submit"
           disabled={busy}
           className="mt-6 w-full rounded-lg bg-accent px-4 py-2.5 font-medium text-white hover:bg-accentDark disabled:opacity-60"
         >
-          Giriş yap
+          {mode === 'register' ? 'Kayıt ol' : mode === 'forgot' ? 'Link iste' : 'Giriş yap'}
         </button>
+        <div className="mt-4 flex flex-wrap justify-center gap-3 text-xs text-slate-500">
+          {mode !== 'login' && (
+            <button type="button" className="underline" onClick={() => setMode('login')}>
+              Giriş
+            </button>
+          )}
+          {mode !== 'register' && (
+            <button type="button" className="underline" onClick={() => setMode('register')}>
+              Kayıt ol
+            </button>
+          )}
+          {mode !== 'forgot' && (
+            <button type="button" className="underline" onClick={() => setMode('forgot')}>
+              Şifremi unuttum
+            </button>
+          )}
+        </div>
         <p className="mt-4 text-center text-xs text-slate-500">
-          Demo: admin@noteforge.local / Admin123!
+          Demo: admin@noteforge.local / Admin123! ·{' '}
+          <Link to="/share/demo" className="underline">
+            paylaşım
+          </Link>
         </p>
       </form>
     </div>

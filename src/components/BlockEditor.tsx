@@ -6,10 +6,35 @@ import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import Dropcursor from '@tiptap/extension-dropcursor';
 import Gapcursor from '@tiptap/extension-gapcursor';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { TextSelection } from '@tiptap/pm/state';
-import { useEffect, useRef, useState } from 'react';
-import type { Block, PageNode } from '@/lib/api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, type Block, type PageNode } from '@/lib/api';
 import { blocksToDoc, docToBlocks } from '@/lib/blocks';
+import type { NoteForgeProvider } from '@/lib/sync';
+
+const YJS_FIELD = 'default';
+
+function blocksHaveContent(blocks: Block[]) {
+  return blocks.some((b) => {
+    if (b.type === 'divider') return true;
+    if (b.type === 'image') return Boolean(b.props.src);
+    return String(b.props.text ?? '').trim().length > 0;
+  });
+}
+
+function payloadHasContent(payload: ReturnType<typeof docToBlocks>) {
+  return payload.blocks.some((b) => {
+    if (b.type === 'divider') return true;
+    if (b.type === 'image') return Boolean(b.props.src);
+    return String(b.props.text ?? '').trim().length > 0;
+  });
+}
+
+function isYFragmentEmpty(doc: NoteForgeProvider['doc']) {
+  return doc.getXmlFragment(YJS_FIELD).length === 0;
+}
 
 type SlashItem = {
   key: string;
@@ -27,6 +52,26 @@ const SLASH_ITEMS: SlashItem[] = [
   { key: 'todo', label: 'Yapılacak', hint: 'Checkbox', run: (ed) => ed.chain().focus().toggleTaskList().run() },
   { key: 'quote', label: 'Alıntı', hint: '>', run: (ed) => ed.chain().focus().toggleBlockquote().run() },
   { key: 'code', label: 'Kod', hint: '```', run: (ed) => ed.chain().focus().toggleCodeBlock().run() },
+  {
+    key: 'callout',
+    label: 'Callout',
+    hint: '!',
+    run: (ed) => ed.chain().focus().insertContent('💡 ').run(),
+  },
+  {
+    key: 'toggle',
+    label: 'Toggle',
+    hint: '▸',
+    run: (ed) =>
+      ed
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'blockquote',
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: '▸ Toggle başlık' }] }],
+        })
+        .run(),
+  },
   { key: 'hr', label: 'Ayırıcı', hint: '---', run: (ed) => ed.chain().focus().setHorizontalRule().run() },
   {
     key: 'image',
@@ -39,9 +84,7 @@ const SLASH_ITEMS: SlashItem[] = [
       input.onchange = () => {
         const file = input.files?.[0];
         if (!file) return;
-        const reader = new FileReader();
-        reader.onload = () => ed.chain().focus().setImage({ src: String(reader.result), alt: file.name }).run();
-        reader.readAsDataURL(file);
+        void insertImageIntoEditor(ed, file, (window as unknown as { __nfWorkspaceId?: string }).__nfWorkspaceId);
       };
       input.click();
     },
@@ -58,6 +101,11 @@ type Props = {
   blocks: Block[];
   pages?: PageNode[];
   currentPageId?: string;
+  workspaceId?: string;
+  /** Yjs + Awareness provider from usePageSync; null = REST-only editor */
+  provider?: NoteForgeProvider | null;
+  /** When true, editor is not editable (e.g. workspace VIEWER) */
+  readOnly?: boolean;
   /** Called after debounce; should return a Promise so UI waits for real save */
   onChange: (payload: ReturnType<typeof docToBlocks>) => void | Promise<unknown>;
   onSaveState?: (state: 'idle' | 'saving' | 'saved' | 'error') => void;
@@ -71,30 +119,103 @@ type Popup = {
   index: number;
 };
 
-export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSaveState }: Props) {
+async function uploadImageFile(workspaceId: string, file: File): Promise<string> {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('workspaceId', workspaceId);
+  const { data } = await api.post<{ url: string }>('/files/upload', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return data.url;
+}
+
+async function insertImageIntoEditor(ed: Editor, file: File, workspaceId?: string) {
+  if (workspaceId) {
+    try {
+      const url = await uploadImageFile(workspaceId, file);
+      ed.chain().focus().setImage({ src: url, alt: file.name }).run();
+      return;
+    } catch {
+      /* fall through to data URL */
+    }
+  }
+  const reader = new FileReader();
+  reader.onload = () =>
+    ed.chain().focus().setImage({ src: String(reader.result), alt: file.name }).run();
+  reader.readAsDataURL(file);
+}
+
+export function BlockEditor({
+  blocks,
+  pages = [],
+  currentPageId,
+  workspaceId,
+  provider = null,
+  readOnly = false,
+  onChange,
+  onSaveState,
+}: Props) {
   const [popup, setPopup] = useState<Popup | null>(null);
+  const [collabSynced, setCollabSynced] = useState(() => provider?.synced ?? false);
   const applyingRemote = useRef(false);
+  const ignoreSave = useRef(false);
   const debounce = useRef<number>();
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
+  const seededCollab = useRef(false);
+  const restHadContent = useRef(blocksHaveContent(blocks));
   const popupRef = useRef(popup);
   popupRef.current = popup;
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onSaveStateRef = useRef(onSaveState);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  useEffect(() => {
+    (window as unknown as { __nfWorkspaceId?: string }).__nfWorkspaceId = workspaceId;
+  }, [workspaceId]);
   onSaveStateRef.current = onSaveState;
   const dirtyRef = useRef(false);
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
+  const collabMode = Boolean(provider && collabSynced);
+
+  useEffect(() => {
+    restHadContent.current = blocksHaveContent(blocks);
+  }, [blocks]);
+
+  useEffect(() => {
+    seededCollab.current = false;
+  }, [currentPageId, provider?.pageId]);
+
+  useEffect(() => {
+    if (!provider) {
+      setCollabSynced(false);
+      return;
+    }
+    setCollabSynced(provider.synced);
+    return provider.onSynced(() => setCollabSynced(true));
+  }, [provider]);
 
   function flushSave(ed: Editor) {
     window.clearTimeout(debounce.current);
-    if (applyingRemote.current || !dirtyRef.current) return;
+    if (applyingRemote.current || ignoreSave.current || !dirtyRef.current || readOnlyRef.current) return;
     dirtyRef.current = false;
     const payload = docToBlocks(ed.getJSON());
+    if (!payloadHasContent(payload) && restHadContent.current) {
+      dirtyRef.current = true;
+      onSaveStateRef.current?.('idle');
+      return;
+    }
     onSaveStateRef.current?.('saving');
     return Promise.resolve(onChangeRef.current(payload))
       .then(() => {
+        restHadContent.current = payloadHasContent(payload);
         onSaveStateRef.current?.('saved');
         window.setTimeout(() => onSaveStateRef.current?.('idle'), 1200);
       })
@@ -104,28 +225,53 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
       });
   }
 
-  const editor = useEditor({
-      extensions: [
-        StarterKit,
-        Dropcursor.configure({ color: '#0f766e', width: 2 }),
-        Gapcursor,
-        TaskList,
-        TaskItem.configure({ nested: true }),
-        Image.configure({
-          inline: false,
-          allowBase64: true,
-          HTMLAttributes: { class: 'nf-image rounded-lg max-w-full my-3' },
+  const extensions = useMemo(() => {
+    const list = [
+      StarterKit.configure({ undoRedo: collabMode ? false : undefined }),
+      Dropcursor.configure({ color: '#0f766e', width: 2 }),
+      Gapcursor,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Image.configure({
+        inline: false,
+        allowBase64: true,
+        HTMLAttributes: { class: 'nf-image rounded-lg max-w-full my-3' },
+      }),
+      Placeholder.configure({
+        placeholder: ({ node }) =>
+          node.type.name === 'heading'
+            ? 'Başlık…'
+            : 'Yaz…  / komut  ·  @ sayfa linki',
+        showOnlyCurrent: false,
+        includeChildren: true,
+      }),
+    ];
+    if (collabMode && provider) {
+      const localUser = provider.awareness.getLocalState()?.user as
+        | { name?: string; color?: string }
+        | undefined;
+      list.push(
+        Collaboration.configure({
+          document: provider.doc,
+          field: YJS_FIELD,
         }),
-        Placeholder.configure({
-          placeholder: ({ node }) =>
-            node.type.name === 'heading'
-              ? 'Başlık…'
-              : 'Yaz…  / komut  ·  @ sayfa linki',
-          showOnlyCurrent: false,
-          includeChildren: true,
+        CollaborationCaret.configure({
+          provider,
+          user: {
+            name: localUser?.name ?? 'Anon',
+            color: localUser?.color ?? '#0f766e',
+          },
         }),
-      ],
-      content: blocksToDoc(blocks),
+      );
+    }
+    return list;
+  }, [collabMode, provider]);
+
+  const editor = useEditor(
+    {
+      extensions,
+      content: collabMode ? undefined : blocksToDoc(blocks),
+      editable: !readOnly,
       editorProps: {
         attributes: {
           class: 'prose prose-slate max-w-none focus:outline-none px-1 min-h-[55vh] cursor-text',
@@ -139,9 +285,7 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
             const file = item.getAsFile();
             if (!file) continue;
             event.preventDefault();
-            const reader = new FileReader();
-            reader.onload = () => ed.chain().focus().setImage({ src: String(reader.result) }).run();
-            reader.readAsDataURL(file);
+            void insertImageIntoEditor(ed, file, workspaceIdRef.current);
             return true;
           }
           return false;
@@ -212,7 +356,7 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
         } else {
           setPopup(null);
         }
-        if (applyingRemote.current) return;
+        if (applyingRemote.current || ignoreSave.current) return;
         dirtyRef.current = true;
         onSaveStateRef.current?.('saving');
         window.clearTimeout(debounce.current);
@@ -220,11 +364,35 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
           void flushSave(ed);
         }, 500);
       },
-  });
+    },
+    [collabMode, provider?.pageId, readOnly],
+  );
 
   useEffect(() => {
     editorRef.current = editor;
-  }, [editor]);
+    if (editor) editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
+
+  // Seed REST blocks into empty Y.Doc once (after collab sync)
+  useEffect(() => {
+    if (!editor || !collabMode || !provider || seededCollab.current) return;
+    if (!isYFragmentEmpty(provider.doc)) {
+      seededCollab.current = true;
+      return;
+    }
+    if (!blocksHaveContent(blocksRef.current)) {
+      seededCollab.current = true;
+      return;
+    }
+    seededCollab.current = true;
+    ignoreSave.current = true;
+    applyingRemote.current = true;
+    editor.commands.setContent(blocksToDoc(blocksRef.current));
+    applyingRemote.current = false;
+    ignoreSave.current = false;
+    dirtyRef.current = false;
+    onSaveStateRef.current?.('idle');
+  }, [editor, collabMode, provider]);
 
   // Flush pending debounce on leave / unmount
   useEffect(() => {
@@ -327,13 +495,22 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
   const slashItems = popup?.kind === 'slash' ? filterSlash(popup.filter) : [];
   const mentionItems = popup?.kind === 'mention' ? filterMentions(popup.filter) : [];
 
+  if (provider && !collabSynced) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-200 bg-white/50 px-4 py-8 text-center text-sm text-slate-500">
+        Canlı işbirliği bağlanıyor…
+      </div>
+    );
+  }
+
   return (
     <div className="relative">
       <div className="mb-2 flex flex-wrap items-center gap-1">
         <button
           type="button"
-          className="rounded border px-2 py-0.5 text-xs hover:bg-panel"
+          className="rounded border px-2 py-0.5 text-xs hover:bg-panel disabled:opacity-40"
           title="Bloğu yukarı taşı"
+          disabled={readOnly}
           onMouseDown={(e) => {
             e.preventDefault();
             moveBlock(-1);
@@ -343,8 +520,9 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
         </button>
         <button
           type="button"
-          className="rounded border px-2 py-0.5 text-xs hover:bg-panel"
+          className="rounded border px-2 py-0.5 text-xs hover:bg-panel disabled:opacity-40"
           title="Bloğu aşağı taşı"
+          disabled={readOnly}
           onMouseDown={(e) => {
             e.preventDefault();
             moveBlock(1);
@@ -354,7 +532,8 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
         </button>
         <button
           type="button"
-          className="rounded border px-2 py-0.5 text-xs hover:bg-panel"
+          className="rounded border px-2 py-0.5 text-xs hover:bg-panel disabled:opacity-40"
+          disabled={readOnly}
           onMouseDown={(e) => {
             e.preventDefault();
             fileRef.current?.click();
@@ -373,10 +552,7 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (!file || !editor) return;
-            const reader = new FileReader();
-            reader.onload = () =>
-              editor.chain().focus().setImage({ src: String(reader.result), alt: file.name }).run();
-            reader.readAsDataURL(file);
+            void insertImageIntoEditor(editor, file, workspaceIdRef.current);
             e.target.value = '';
           }}
         />

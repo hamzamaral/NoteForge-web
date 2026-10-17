@@ -65,10 +65,16 @@ export function getErrorMessage(e: unknown) {
   return e instanceof Error ? e.message : 'Hata';
 }
 
-export type User = { id: string; email: string; fullName: string };
+export type User = {
+  id: string;
+  email: string;
+  fullName: string;
+  emailVerifiedAt?: string | null;
+};
 export type Workspace = {
   id: string;
   name: string;
+  myRole?: 'OWNER' | 'EDITOR' | 'VIEWER' | null;
   members?: { role: string; user: User }[];
 };
 export type PageNode = {
@@ -80,9 +86,10 @@ export type PageNode = {
   isFavorite?: boolean;
 };
 export type SearchHit = PageNode & {
-  match: 'title' | 'content' | 'task';
+  match: 'title' | 'content' | 'task' | 'comment' | 'db_row' | 'page';
   snippet: string | null;
   score: number;
+  kind?: string;
 };
 export type Block = {
   id: string;
@@ -103,4 +110,5 @@ export type Task = {
   status: 'TODO' | 'DOING' | 'DONE';
   dueAt?: string | null;
   pageId?: string | null;
+  assigneeId?: string | null;
 };

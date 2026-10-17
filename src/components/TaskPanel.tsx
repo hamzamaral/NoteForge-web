@@ -15,15 +15,20 @@ export function TaskPanel({
   workspaceId,
   pageId,
   seedTodos,
+  members = [],
+  currentUserId,
 }: {
   workspaceId: string;
   pageId?: string;
   /** Editördeki checkbox metinlerini panelle senkronlamak için */
   seedTodos?: { text: string; checked: boolean }[];
+  members?: { id: string; fullName: string }[];
+  currentUserId?: string;
 }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState('');
   const [dueAt, setDueAt] = useState('');
+  const [assigneeId, setAssigneeId] = useState('');
   const [filter, setFilter] = useState<'ALL' | Task['status']>('ALL');
 
   const { data: tasks = [] } = useQuery({
@@ -48,11 +53,16 @@ export function TaskPanel({
   }, [tasks]);
 
   const create = useMutation({
-    mutationFn: (payload: { title: string; dueAt?: string; status?: Task['status'] }) =>
-      api.post('/tasks', { workspaceId, pageId, ...payload }),
+    mutationFn: (payload: {
+      title: string;
+      dueAt?: string;
+      status?: Task['status'];
+      assigneeId?: string;
+    }) => api.post('/tasks', { workspaceId, pageId, ...payload }),
     onSuccess: () => {
       setTitle('');
       setDueAt('');
+      setAssigneeId('');
       void qc.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e) => toast.error(getErrorMessage(e)),
@@ -67,6 +77,7 @@ export function TaskPanel({
       status?: Task['status'];
       title?: string;
       dueAt?: string | null;
+      assigneeId?: string | null;
     }) => api.patch(`/tasks/${id}`, patch),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['tasks'] }),
   });
@@ -130,6 +141,7 @@ export function TaskPanel({
             create.mutate({
               title: title.trim(),
               dueAt: fromDateInputValue(dueAt) || undefined,
+              assigneeId: assigneeId || undefined,
             });
           }
         }}
@@ -140,6 +152,22 @@ export function TaskPanel({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
+        {members.length > 0 && (
+          <select
+            className="w-full rounded border bg-white px-2 py-1 text-xs"
+            value={assigneeId}
+            onChange={(e) => setAssigneeId(e.target.value)}
+            aria-label="Atanan"
+          >
+            <option value="">Atanan yok</option>
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.fullName}
+                {m.id === currentUserId ? ' (ben)' : ''}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="flex gap-1">
           <input
             type="date"
@@ -194,6 +222,26 @@ export function TaskPanel({
               title="Bitiş tarihi"
               onCommit={(iso) => update.mutate({ id: t.id, dueAt: iso })}
             />
+            {members.length > 0 && (
+              <select
+                className="mt-1 w-full rounded border bg-white text-xs"
+                value={t.assigneeId || ''}
+                aria-label="Atanan"
+                onChange={(e) =>
+                  update.mutate({
+                    id: t.id,
+                    assigneeId: e.target.value || null,
+                  })
+                }
+              >
+                <option value="">Atanan yok</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.fullName}
+                  </option>
+                ))}
+              </select>
+            )}
           </li>
         ))}
         {!visible.length && (

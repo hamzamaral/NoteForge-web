@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, getErrorMessage } from '@/lib/api';
 import { DateField } from '@/components/DateField';
 import { toDateInputValue } from '@/lib/dates';
@@ -32,7 +33,10 @@ function optsOf(p: Prop): string[] {
 
 export function DatabaseView({ pageId }: { pageId: string }) {
   const qc = useQueryClient();
-  const [viewType, setViewType] = useState<'table' | 'board'>('table');
+  const navigate = useNavigate();
+  const [viewType, setViewType] = useState<'table' | 'board' | 'calendar' | 'gallery' | 'list'>(
+    'table',
+  );
   const [filterStatus, setFilterStatus] = useState('');
   const [sortBy, setSortBy] = useState('Ad');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -77,6 +81,16 @@ export function DatabaseView({ pageId }: { pageId: string }) {
   const deleteRow = useMutation({
     mutationFn: (id: string) => api.delete(`/databases/rows/${id}`),
     onSuccess: invalidate,
+  });
+
+  const openAsPage = useMutation({
+    mutationFn: async (rowId: string) =>
+      (await api.post<{ id: string }>(`/databases/rows/${rowId}/open-page`)).data,
+    onSuccess: (page) => {
+      void qc.invalidateQueries({ queryKey: ['pages'] });
+      navigate(`/p/${page.id}`);
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const addProperty = useMutation({
@@ -262,6 +276,27 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         >
           Board
         </button>
+        <button
+          type="button"
+          className={`rounded px-2 py-1 text-xs ${viewType === 'calendar' ? 'bg-accent text-white' : 'bg-panel'}`}
+          onClick={() => setViewType('calendar')}
+        >
+          Takvim
+        </button>
+        <button
+          type="button"
+          className={`rounded px-2 py-1 text-xs ${viewType === 'gallery' ? 'bg-accent text-white' : 'bg-panel'}`}
+          onClick={() => setViewType('gallery')}
+        >
+          Galeri
+        </button>
+        <button
+          type="button"
+          className={`rounded px-2 py-1 text-xs ${viewType === 'list' ? 'bg-accent text-white' : 'bg-panel'}`}
+          onClick={() => setViewType('list')}
+        >
+          Liste
+        </button>
         <select
           className="rounded border px-1 text-xs"
           value={filterStatus}
@@ -326,7 +361,12 @@ export function DatabaseView({ pageId }: { pageId: string }) {
           <option value="text">text</option>
           <option value="number">number</option>
           <option value="select">select</option>
+          <option value="multi_select">multi_select</option>
+          <option value="checkbox">checkbox</option>
+          <option value="url">url</option>
           <option value="date">date</option>
+          <option value="person">person</option>
+          <option value="files">files</option>
         </select>
         <button
           type="button"
@@ -339,7 +379,7 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         <span className="text-slate-400">· kolon silmek için başlıktaki ×</span>
       </div>
 
-      {viewType === 'table' ? (
+      {viewType === 'table' && (
         <div className="overflow-x-auto border bg-white">
           <table className="min-w-full text-sm">
             <thead className="bg-slate-100 text-left text-xs uppercase text-slate-600">
@@ -377,7 +417,14 @@ export function DatabaseView({ pageId }: { pageId: string }) {
                       {cellEditor(p, row)}
                     </td>
                   ))}
-                  <td className="px-2 py-2">
+                  <td className="px-2 py-2 space-x-2 whitespace-nowrap">
+                    <button
+                      type="button"
+                      className="text-xs text-accent"
+                      onClick={() => openAsPage.mutate(row.id)}
+                    >
+                      Sayfa
+                    </button>
                     <button
                       type="button"
                       className="text-xs text-red-600"
@@ -394,7 +441,9 @@ export function DatabaseView({ pageId }: { pageId: string }) {
             <p className="p-4 text-sm text-slate-500">Filtreye uyan satır yok.</p>
           )}
         </div>
-      ) : (
+      )}
+
+      {viewType === 'board' && (
         <div className="grid gap-3 md:grid-cols-3">
           {Object.entries(groups).map(([status, groupRows]) => (
             <div
@@ -435,6 +484,55 @@ export function DatabaseView({ pageId }: { pageId: string }) {
             </div>
           ))}
         </div>
+      )}
+
+      {viewType === 'calendar' && (
+        <div className="space-y-2 rounded-xl border bg-white p-3">
+          <p className="text-xs text-slate-500">Tarih alanına göre (Tarih)</p>
+          <ul className="space-y-2">
+            {rows
+              .slice()
+              .sort((a, b) => String(a.values.Tarih || '').localeCompare(String(b.values.Tarih || '')))
+              .map((row) => (
+                <li key={row.id} className="flex items-center gap-3 rounded-lg bg-panel px-3 py-2 text-sm">
+                  <span className="w-28 shrink-0 font-mono text-xs text-accent">
+                    {String(row.values.Tarih || '—')}
+                  </span>
+                  <span className="font-medium">{String(row.values.Ad || 'Adsız')}</span>
+                  <span className="ml-auto text-[10px] text-slate-500">
+                    {String(row.values.Durum || '')}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
+
+      {viewType === 'gallery' && (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((row) => (
+            <div key={row.id} className="rounded-xl border bg-white p-4 shadow-sm">
+              <div className="mb-2 flex h-24 items-center justify-center rounded-lg bg-panel text-3xl text-slate-300">
+                ▦
+              </div>
+              <h3 className="font-medium">{String(row.values.Ad || '—')}</h3>
+              <p className="text-xs text-slate-500">
+                {String(row.values.Durum || '')} · {String(row.values.Öncelik || '')}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {viewType === 'list' && (
+        <ul className="divide-y rounded-xl border bg-white">
+          {rows.map((row) => (
+            <li key={row.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="font-medium">{String(row.values.Ad || '—')}</span>
+              <span className="text-xs text-slate-400">{String(row.values.Durum || '')}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -19,6 +19,7 @@ import { TemplateGallery } from '@/components/TemplateGallery';
 import { SharePanel } from '@/components/SharePanel';
 import { MembersPanel } from '@/components/MembersPanel';
 import { SearchPalette } from '@/components/SearchPalette';
+import { NotificationBell } from '@/components/NotificationBell';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
 import { getRecents, pruneRecents, pushRecent, removeRecent } from '@/lib/recents';
@@ -36,7 +37,9 @@ export function WorkspacePage() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [recents, setRecents] = useState(() => getRecents());
+  const [navOpen, setNavOpen] = useState(false);
   const mdInputRef = useRef<HTMLInputElement>(null);
   const versionRef = useRef<number>(0);
 
@@ -45,6 +48,8 @@ export function WorkspacePage() {
     queryFn: async () => (await api.get<Workspace[]>('/workspaces')).data,
   });
   const workspaceId = workspaces[0]?.id;
+  const myRole = workspaces[0]?.myRole;
+  const canEdit = myRole === 'OWNER' || myRole === 'EDITOR';
 
   const { data: pages = [] } = useQuery({
     queryKey: ['pages', workspaceId],
@@ -93,7 +98,7 @@ export function WorkspacePage() {
     queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
   });
 
-  const { presence, status: syncStatus } = usePageSync(
+  const { presence, status: syncStatus, provider } = usePageSync(
     page && pageId ? pageId : undefined,
     user,
   );
@@ -267,10 +272,41 @@ export function WorkspacePage() {
 
   return (
     <div className="flex h-full min-h-screen">
-      <aside className="flex w-64 flex-col border-r border-slate-200 bg-white/80">
+      <button
+        type="button"
+        className="fixed left-3 top-3 z-40 rounded border bg-white px-2 py-1 text-xs shadow md:hidden"
+        aria-label="Menüyü aç"
+        onClick={() => setNavOpen(true)}
+      >
+        ☰
+      </button>
+      {navOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-ink/40 md:hidden"
+          aria-label="Menüyü kapat"
+          onClick={() => setNavOpen(false)}
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-slate-200 bg-white/95 transition-transform md:static md:z-0 md:w-64 md:max-w-none md:translate-x-0 ${
+          navOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="border-b px-3 py-3">
-          <div className="font-display text-lg font-bold">NoteForge</div>
-          <p className="truncate text-xs text-slate-500">{workspaces[0]?.name}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div className="font-display text-lg font-bold">NoteForge</div>
+            <NotificationBell />
+          </div>
+          <p className="truncate text-xs text-slate-500">
+            {workspaces[0]?.name}
+            {myRole ? ` · ${myRole}` : ''}
+          </p>
+          {!canEdit && (
+            <p className="mt-1 text-[10px] text-amber-700" role="status">
+              Salt okuma (VIEWER)
+            </p>
+          )}
         </div>
         <div className="space-y-1 p-2">
           <div className="flex gap-1">
@@ -291,7 +327,8 @@ export function WorkspacePage() {
           </div>
           <button
             type="button"
-            className="w-full rounded bg-accent px-2 py-1.5 text-left text-sm text-white"
+            className="w-full rounded bg-accent px-2 py-1.5 text-left text-sm text-white disabled:opacity-50"
+            disabled={!canEdit}
             onClick={() => createPage.mutate({})}
           >
             + Yeni sayfa
@@ -475,7 +512,7 @@ export function WorkspacePage() {
             <>
               <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <Breadcrumb pages={pages} pageId={page.id} />
-                <span className="ml-auto flex items-center gap-2">
+                <span className="ml-auto flex items-center gap-2" aria-live="polite">
                   <span
                     className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[10px]"
                     title="Socket.IO /sync + Yjs"
@@ -501,11 +538,13 @@ export function WorkspacePage() {
                             ? 'Sync hata'
                             : 'Çevrimdışı'}
                   </span>
-                  {saveState === 'saving' && 'Kaydediliyor…'}
-                  {saveState === 'saved' && 'Kaydedildi'}
-                  {saveState === 'error' && (
-                    <span className="text-red-600">Kayıt başarısız</span>
-                  )}
+                  <span aria-live="polite" aria-atomic="true">
+                    {saveState === 'saving' && 'Kaydediliyor…'}
+                    {saveState === 'saved' && 'Kaydedildi'}
+                    {saveState === 'error' && (
+                      <span className="text-red-600">Kayıt başarısız</span>
+                    )}
+                  </span>
                 </span>
                 <div className="flex items-center gap-1">
                   {presence.map((p) => (
@@ -560,9 +599,41 @@ export function WorkspacePage() {
                 >
                   Paylaş
                 </button>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-1 text-xs"
+                  disabled={!canEdit}
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  Geçmiş
+                </button>
                 <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => exportMd.mutate()}>
                   MD dışa aktar
                 </button>
+                {myRole === 'OWNER' && workspaceId && (
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-1 text-xs"
+                    onClick={async () => {
+                      try {
+                        const res = await api.get(`/admin/workspaces/${workspaceId}/export.zip`, {
+                          responseType: 'blob',
+                        });
+                        const url = URL.createObjectURL(res.data);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `noteforge-export.zip`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        toast.success('Workspace ZIP indirildi');
+                      } catch (e) {
+                        toast.error(getErrorMessage(e));
+                      }
+                    }}
+                  >
+                    ZIP export
+                  </button>
+                )}
                 <button type="button" className="rounded border px-2 py-1 text-xs text-red-600" onClick={() => trashPage.mutate()}>
                   Sil
                 </button>
@@ -621,6 +692,9 @@ export function WorkspacePage() {
                     blocks={page.blocks.filter((b) => b.type !== 'drawing')}
                     pages={pages}
                     currentPageId={page.id}
+                    workspaceId={workspaceId}
+                    provider={provider}
+                    readOnly={!canEdit}
                     onChange={(payload) => {
                       // Editor doesn't own drawing blocks — merge them back so autosave
                       // doesn't wipe Excalidraw scenes.
@@ -712,9 +786,101 @@ export function WorkspacePage() {
             workspaceId={workspaceId}
             pageId={pageId}
             seedTodos={editorTodos}
+            currentUserId={user?.id}
+            members={(workspaces[0]?.members || []).map((m) => ({
+              id: m.user.id,
+              fullName: m.user.fullName,
+            }))}
+          />
+        )}
+        {historyOpen && pageId && (
+          <HistoryModal
+            pageId={pageId}
+            onClose={() => setHistoryOpen(false)}
+            onRestored={() => {
+              setHistoryOpen(false);
+              void qc.invalidateQueries({ queryKey: ['page', pageId] });
+            }}
           />
         )}
       </main>
+    </div>
+  );
+}
+
+function HistoryModal({
+  pageId,
+  onClose,
+  onRestored,
+}: {
+  pageId: string;
+  onClose: () => void;
+  onRestored: () => void;
+}) {
+  const { data: snaps = [], isLoading } = useQuery({
+    queryKey: ['snapshots', pageId],
+    queryFn: async () =>
+      (
+        await api.get<{ id: string; version: number; title: string; createdAt: string }[]>(
+          `/pages/${pageId}/snapshots`,
+        )
+      ).data,
+  });
+  const restore = useMutation({
+    mutationFn: (snapshotId: string) =>
+      api.post(`/pages/${pageId}/snapshots/${snapshotId}/restore`),
+    onSuccess: () => {
+      toast.success('Sürüm geri yüklendi');
+      onRestored();
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 px-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="max-h-[70vh] w-full max-w-md overflow-hidden rounded-xl border bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sayfa geçmişi"
+      >
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="font-semibold">Geçmiş</h2>
+          <button type="button" className="text-sm text-slate-500" onClick={onClose}>
+            Kapat
+          </button>
+        </div>
+        <ul className="max-h-[55vh] overflow-y-auto p-2">
+          {isLoading && <li className="p-3 text-sm text-slate-500">Yükleniyor…</li>}
+          {!isLoading && !snaps.length && (
+            <li className="p-3 text-sm text-slate-500">Henüz snapshot yok</li>
+          )}
+          {snaps.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-center justify-between gap-2 rounded-lg px-3 py-2 hover:bg-panel"
+            >
+              <div>
+                <p className="text-sm font-medium">v{s.version} · {s.title}</p>
+                <p className="text-[11px] text-slate-500">
+                  {new Date(s.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded border px-2 py-1 text-xs text-accent"
+                onClick={() => restore.mutate(s.id)}
+              >
+                Geri al
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

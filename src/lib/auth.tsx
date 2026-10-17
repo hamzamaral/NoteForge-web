@@ -5,6 +5,7 @@ type AuthCtx = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -33,6 +34,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.user);
   }
 
+  async function register(email: string, password: string, fullName: string) {
+    const { data } = await api.post('/auth/register', { email, password, fullName });
+    setTokens(data.accessToken, data.refreshToken);
+    setUser(data.user);
+  }
+
   async function logout() {
     const refreshToken = localStorage.getItem('nf_refresh');
     try {
@@ -44,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <Ctx.Provider value={{ user, loading, login, logout }}>{children}</Ctx.Provider>
+    <Ctx.Provider value={{ user, loading, login, register, logout }}>{children}</Ctx.Provider>
   );
 }
 

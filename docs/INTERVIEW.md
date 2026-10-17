@@ -23,7 +23,10 @@ Markdown loses structure for todos, drawings, and database embeds. We persist a 
 ProseMirror foundation, React bindings, slash menus, task lists, Collaboration/CollaborationCaret for Yjs, and a large extension ecosystem. Alternative was Plate; we ADRed TipTap for speed to demo (`docs/adr/0001-editor-tiptap.md`).
 
 ### How do block reorder and images work?
-Top-level nodes swap via ↑/↓ (transaction rewrite). Native HTML5 drop uses TipTap Dropcursor/Gapcursor. Images are TipTap Image nodes persisted as `{ type: image, props: { src, alt } }` — paste or file picker stores base64 for the demo (S3 comes later).
+Top-level nodes swap via ↑/↓ (transaction rewrite). Native HTML5 drop uses TipTap Dropcursor/Gapcursor. Images are TipTap Image nodes with URL `src` from `POST /files/upload` (local `./uploads`; MinIO optional). Base64 is only a fallback if upload fails.
+
+### How is VIEWER enforced?
+`assertMember(userId, workspaceId, minRole)` ranks VIEWER < EDITOR < OWNER. Mutating REST uses EDITOR+. Sync `joinPage` checks membership; `yjsUpdate` requires `canEdit`. Web disables editor/controls when `myRole === VIEWER`.
 
 ### How do page links / backlinks work?
 Typing `@` opens a page picker; insert `@[Title](uuid)`. On save we parse mentions into `PageLink` rows. Target page shows a backlink panel. Moving a page updates `parentId` with cycle detection (cannot nest under own descendant).

@@ -69,7 +69,7 @@ export function SharePanel({
             onChange={(e) => setPermission(e.target.value as 'READ' | 'COMMENT')}
           >
             <option value="READ">Salt okunur</option>
-            <option value="COMMENT">Yorum (yakında public)</option>
+            <option value="COMMENT">Yorum açık (public)</option>
           </select>
           <button
             type="button"
