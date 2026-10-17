@@ -21,7 +21,8 @@ import { MembersPanel } from '@/components/MembersPanel';
 import { SearchPalette } from '@/components/SearchPalette';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
-import { getRecents, pushRecent } from '@/lib/recents';
+import { getRecents, pruneRecents, pushRecent, removeRecent } from '@/lib/recents';
+import axios from 'axios';
 
 export function WorkspacePage() {
   const { user, logout } = useAuth();
@@ -31,12 +32,13 @@ export function WorkspacePage() {
   const [q, setQ] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [recents, setRecents] = useState(() => getRecents());
   const mdInputRef = useRef<HTMLInputElement>(null);
+  const versionRef = useRef<number>(0);
 
   const { data: workspaces = [] } = useQuery({
     queryKey: ['workspaces'],
@@ -80,24 +82,50 @@ export function WorkspacePage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const { data: page } = useQuery({
+  const {
+    data: page,
+    isError: pageMissing,
+    error: pageError,
+  } = useQuery({
     queryKey: ['page', pageId],
     enabled: !!pageId,
+    retry: false,
     queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
   });
 
-  const { presence, status: syncStatus, provider, myColor } = usePageSync(pageId, user);
+  const { presence, status: syncStatus } = usePageSync(
+    page && pageId ? pageId : undefined,
+    user,
+  );
 
   useEffect(() => {
     if (!pageId && pages[0]) navigate(`/p/${pages[0].id}`, { replace: true });
   }, [pageId, pages, navigate]);
 
+  // Drop deleted/trashed pages from "Son bakılanlar"
+  useEffect(() => {
+    if (!pages.length) return;
+    setRecents(pruneRecents(pages.map((p) => p.id)));
+  }, [pages]);
+
   useEffect(() => {
     if (page) {
+      versionRef.current = page.contentVersion;
       pushRecent({ id: page.id, title: page.title });
       setRecents(getRecents());
     }
-  }, [page?.id, page?.title]);
+  }, [page?.id, page?.title, page?.contentVersion]);
+
+  // Clicked a recent that was deleted → soft recover
+  useEffect(() => {
+    if (!pageId || !pageMissing) return;
+    removeRecent(pageId);
+    setRecents(getRecents());
+    const msg = getErrorMessage(pageError);
+    toast.message(msg === 'Sayfa bulunamadı' ? 'Bu sayfa silinmiş — listeden çıkarıldı' : msg);
+    const fallback = pages.find((p) => p.id !== pageId)?.id;
+    navigate(fallback ? `/p/${fallback}` : '/', { replace: true });
+  }, [pageId, pageMissing, pageError, pages, navigate]);
 
   const tree = useMemo(() => buildTree(pages), [pages]);
 
@@ -124,14 +152,27 @@ export function WorkspacePage() {
   const saveBlocks = useMutation({
     mutationFn: (payload: ReturnType<typeof docToBlocks>) =>
       api.patch(`/pages/${pageId}/blocks`, {
-        expectedVersion: page!.contentVersion,
+        expectedVersion: versionRef.current,
         blocks: payload.blocks,
         links: payload.links,
       }),
     onSuccess: (res) => {
+      versionRef.current = res.data.contentVersion;
+      // Keep editor mounted; only refresh metadata/version in cache
       qc.setQueryData(['page', pageId], res.data);
     },
-    onError: (e) => toast.error(getErrorMessage(e)),
+    onError: async (e) => {
+      if (axios.isAxiosError(e) && e.response?.status === 409) {
+        const fresh = await qc.fetchQuery({
+          queryKey: ['page', pageId],
+          queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
+        });
+        versionRef.current = fresh.contentVersion;
+        toast.error('Kayıt çakışması — sürüm yenilendi, tekrar yazın');
+        return;
+      }
+      toast.error(getErrorMessage(e));
+    },
   });
 
   const rename = useMutation({
@@ -191,8 +232,14 @@ export function WorkspacePage() {
   const trashPage = useMutation({
     mutationFn: () => api.delete(`/pages/${pageId}`),
     onSuccess: async () => {
+      if (pageId) {
+        removeRecent(pageId);
+        setRecents(getRecents());
+      }
       await qc.invalidateQueries({ queryKey: ['pages'] });
-      navigate('/');
+      await qc.removeQueries({ queryKey: ['page', pageId] });
+      const next = pages.find((p) => p.id !== pageId)?.id;
+      navigate(next ? `/p/${next}` : '/', { replace: true });
       toast.message('Çöp kutusuna taşındı');
     },
   });
@@ -452,6 +499,9 @@ export function WorkspacePage() {
                   </span>
                   {saveState === 'saving' && 'Kaydediliyor…'}
                   {saveState === 'saved' && 'Kaydedildi'}
+                  {saveState === 'error' && (
+                    <span className="text-red-600">Kayıt başarısız</span>
+                  )}
                 </span>
                 <div className="flex items-center gap-1">
                   {presence.map((p) => (
@@ -567,16 +617,25 @@ export function WorkspacePage() {
                     blocks={page.blocks.filter((b) => b.type !== 'drawing')}
                     pages={pages}
                     currentPageId={page.id}
-                    onChange={(payload) => saveBlocks.mutate(payload)}
+                    onChange={(payload) => {
+                      // Editor doesn't own drawing blocks — merge them back so autosave
+                      // doesn't wipe Excalidraw scenes.
+                      const drawings = page.blocks.filter((b) => b.type === 'drawing');
+                      const base = payload.blocks.length;
+                      return saveBlocks.mutateAsync({
+                        blocks: [
+                          ...payload.blocks,
+                          ...drawings.map((d, i) => ({
+                            id: d.id,
+                            type: d.type,
+                            props: d.props,
+                            sortOrder: base + i + 1,
+                          })),
+                        ],
+                        links: payload.links,
+                      });
+                    }}
                     onSaveState={setSaveState}
-                    collab={
-                      provider && user
-                        ? {
-                            provider,
-                            user: { name: user.fullName, color: myColor },
-                          }
-                        : null
-                    }
                   />
                   {drawingBlocks.map((b) => (
                     <DrawingBlock
