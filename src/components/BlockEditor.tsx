@@ -85,6 +85,24 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
   onChangeRef.current = onChange;
   const onSaveStateRef = useRef(onSaveState);
   onSaveStateRef.current = onSaveState;
+  const dirtyRef = useRef(false);
+
+  function flushSave(ed: Editor) {
+    window.clearTimeout(debounce.current);
+    if (applyingRemote.current || !dirtyRef.current) return;
+    dirtyRef.current = false;
+    const payload = docToBlocks(ed.getJSON());
+    onSaveStateRef.current?.('saving');
+    return Promise.resolve(onChangeRef.current(payload))
+      .then(() => {
+        onSaveStateRef.current?.('saved');
+        window.setTimeout(() => onSaveStateRef.current?.('idle'), 1200);
+      })
+      .catch(() => {
+        dirtyRef.current = true;
+        onSaveStateRef.current?.('error');
+      });
+  }
 
   const editor = useEditor({
       extensions: [
@@ -195,19 +213,11 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
           setPopup(null);
         }
         if (applyingRemote.current) return;
+        dirtyRef.current = true;
         onSaveStateRef.current?.('saving');
         window.clearTimeout(debounce.current);
         debounce.current = window.setTimeout(() => {
-          if (applyingRemote.current) return;
-          const payload = docToBlocks(ed.getJSON());
-          Promise.resolve(onChangeRef.current(payload))
-            .then(() => {
-              onSaveStateRef.current?.('saved');
-              window.setTimeout(() => onSaveStateRef.current?.('idle'), 1200);
-            })
-            .catch(() => {
-              onSaveStateRef.current?.('error');
-            });
+          void flushSave(ed);
         }, 500);
       },
   });
@@ -215,6 +225,19 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  // Flush pending debounce on leave / unmount
+  useEffect(() => {
+    function onLeave() {
+      const ed = editorRef.current;
+      if (ed) void flushSave(ed);
+    }
+    window.addEventListener('pagehide', onLeave);
+    return () => {
+      window.removeEventListener('pagehide', onLeave);
+      onLeave();
+    };
+  }, []);
 
   // Do NOT re-setContent on every save: server assigns new block ids each PATCH
   // and would wipe in-progress typing. Remount via key={pageId} loads fresh content.
