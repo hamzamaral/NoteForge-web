@@ -18,6 +18,7 @@ export function WorkspacePage() {
   const qc = useQueryClient();
   const [q, setQ] = useState('');
   const [showTrash, setShowTrash] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
 
   const { data: workspaces = [] } = useQuery({
     queryKey: ['workspaces'],
@@ -56,7 +57,7 @@ export function WorkspacePage() {
     queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
   });
 
-  usePageSync(pageId, user);
+  const { presence } = usePageSync(pageId, user);
 
   useEffect(() => {
     if (!pageId && pages[0]) navigate(`/p/${pages[0].id}`, { replace: true });
@@ -65,8 +66,8 @@ export function WorkspacePage() {
   const tree = useMemo(() => buildTree(pages), [pages]);
 
   const createPage = useMutation({
-    mutationFn: (templateKey?: string) =>
-      api.post('/pages', { workspaceId, templateKey }),
+    mutationFn: (opts?: { templateKey?: string; parentId?: string; title?: string }) =>
+      api.post('/pages', { workspaceId, ...opts }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ['pages'] });
       navigate(`/p/${res.data.id}`);
@@ -161,21 +162,31 @@ export function WorkspacePage() {
           <button
             type="button"
             className="w-full rounded bg-accent px-2 py-1.5 text-left text-sm text-white"
-            onClick={() => createPage.mutate(undefined)}
+            onClick={() => createPage.mutate({})}
           >
             + Yeni sayfa
           </button>
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            onClick={() => createPage.mutate('meeting')}
+            disabled={!pageId}
+            onClick={() =>
+              createPage.mutate({ parentId: pageId, title: 'Alt sayfa' })
+            }
+          >
+            + Alt sayfa (bu sayfanın altında)
+          </button>
+          <button
+            type="button"
+            className="w-full rounded border px-2 py-1 text-left text-xs"
+            onClick={() => createPage.mutate({ templateKey: 'meeting' })}
           >
             Şablon: Toplantı
           </button>
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            onClick={() => createPage.mutate('project')}
+            onClick={() => createPage.mutate({ templateKey: 'project' })}
           >
             Şablon: Proje
           </button>
@@ -192,16 +203,27 @@ export function WorkspacePage() {
             ? searchHits.map((p) => ({ ...p, depth: 0 }))
             : flattenTree(tree)
           ).map((p) => (
-            <Link
+            <div
               key={p.id}
-              to={`/p/${p.id}`}
-              className={`block rounded px-2 py-1 text-sm ${
+              className={`group flex items-center rounded ${
                 p.id === pageId ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
               }`}
-              style={{ paddingLeft: 8 + p.depth * 12 }}
+              style={{ paddingLeft: 4 + p.depth * 12 }}
             >
-              {p.icon || '📄'} {p.title}
-            </Link>
+              <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate px-2 py-1 text-sm">
+                {p.icon || '📄'} {p.title}
+              </Link>
+              <button
+                type="button"
+                title="Alt sayfa ekle"
+                className="mr-1 hidden rounded px-1 text-xs text-slate-400 group-hover:inline hover:text-accent"
+                onClick={() =>
+                  createPage.mutate({ parentId: p.id, title: 'Alt sayfa' })
+                }
+              >
+                +
+              </button>
+            </div>
           ))}
         </nav>
         <div className="border-t p-2 text-xs">
@@ -236,6 +258,27 @@ export function WorkspacePage() {
         <div className="min-w-0 flex-1 overflow-y-auto p-6 md:p-10">
           {page ? (
             <>
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <Breadcrumb pages={pages} pageId={page.id} />
+                <span className="ml-auto">
+                  {saveState === 'saving' && 'Kaydediliyor…'}
+                  {saveState === 'saved' && 'Kaydedildi'}
+                </span>
+                {presence.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    {presence.map((p) => (
+                      <span
+                        key={p.userId + p.color}
+                        title={p.name}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                        style={{ background: p.color }}
+                      >
+                        {p.name.slice(0, 1).toUpperCase()}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <input
                   className="font-display min-w-0 flex-1 bg-transparent text-3xl font-bold outline-none"
@@ -271,6 +314,7 @@ export function WorkspacePage() {
                   <BlockEditor
                     blocks={page.blocks.filter((b) => b.type !== 'drawing')}
                     onChange={(payload) => saveBlocks.mutate(payload)}
+                    onSaveState={setSaveState}
                   />
                   {drawingBlocks.map((b) => (
                     <DrawingBlock
@@ -305,6 +349,29 @@ export function WorkspacePage() {
         )}
       </main>
     </div>
+  );
+}
+
+function Breadcrumb({ pages, pageId }: { pages: PageNode[]; pageId: string }) {
+  const chain: PageNode[] = [];
+  let cur: PageNode | undefined = pages.find((p) => p.id === pageId);
+  const guard = new Set<string>();
+  while (cur && !guard.has(cur.id)) {
+    chain.unshift(cur);
+    guard.add(cur.id);
+    cur = cur.parentId ? pages.find((p) => p.id === cur!.parentId) : undefined;
+  }
+  return (
+    <nav className="flex flex-wrap items-center gap-1">
+      {chain.map((p, i) => (
+        <span key={p.id} className="flex items-center gap-1">
+          {i > 0 && <span className="text-slate-300">/</span>}
+          <Link to={`/p/${p.id}`} className="hover:text-accent hover:underline">
+            {p.title}
+          </Link>
+        </span>
+      ))}
+    </nav>
   );
 }
 

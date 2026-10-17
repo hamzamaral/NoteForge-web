@@ -3,7 +3,7 @@
 | Faz | İçerik | Durum |
 |-----|--------|-------|
 | 0 | İskelet, docs, Cursor rules, seed | ship |
-| 1 | TipTap, slash, autosave, tree, trash | ship |
+| 1 | TipTap, slash, autosave, tree, trash | ship + deepen (image, ↑↓, breadcrumb, presence UI) |
 | 2 | Nested pages, tasks, backlinks | ship |
 | 3 | Excalidraw, templates, MD export | ship |
 | 4 | Database table/board | ship |

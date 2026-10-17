@@ -9,6 +9,7 @@
 | quote | `{ text }` |
 | code | `{ text }` |
 | divider | `{}` |
+| image | `{ src, alt? }` (base64 veya URL) |
 | drawing | `{ sceneId, scene?, elements? }` |
 
 New type checklist: update this file + TipTap mapping in `blocks.ts` + optional renderer.

@@ -49,6 +49,14 @@ export function blocksToDoc(blocks: Block[]): JSONContent {
         };
       case 'divider':
         return { type: 'horizontalRule' };
+      case 'image':
+        return {
+          type: 'image',
+          attrs: {
+            src: String(b.props.src || ''),
+            alt: String(b.props.alt || ''),
+          },
+        };
       case 'drawing':
         return {
           type: 'paragraph',
@@ -140,6 +148,15 @@ export function docToBlocks(doc: JSONContent): {
       blocks.push({ type: 'code', props: { text }, sortOrder: order++ });
     } else if (node.type === 'horizontalRule') {
       blocks.push({ type: 'divider', props: {}, sortOrder: order++ });
+    } else if (node.type === 'image') {
+      blocks.push({
+        type: 'image',
+        props: {
+          src: String(node.attrs?.src || ''),
+          alt: String(node.attrs?.alt || ''),
+        },
+        sortOrder: order++,
+      });
     }
   }
 
