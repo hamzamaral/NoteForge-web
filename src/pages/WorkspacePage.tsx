@@ -112,11 +112,11 @@ export function WorkspacePage() {
   });
 
   const createDb = useMutation({
-    mutationFn: () => api.post('/databases', { workspaceId, name: 'Yeni DB' }),
+    mutationFn: (name: string) => api.post('/databases', { workspaceId, name }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ['pages'] });
       navigate(`/p/${res.data.pageId}`);
-      toast.success('Veritabanı oluşturuldu');
+      toast.success('Veritabanı hazır — tablo ve board görünümleri');
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -289,9 +289,17 @@ export function WorkspacePage() {
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            onClick={() => createDb.mutate()}
+            title="Notion tarzı tablo + board: satırlar, özellikler, sürükle-bırak"
+            onClick={() => {
+              const name = window.prompt(
+                'Veritabanı adı\n(Tablo ve board görünümü olan özel bir sayfa açılır)',
+                'Proje listesi',
+              );
+              if (name === null) return;
+              createDb.mutate(name.trim() || 'Proje listesi');
+            }}
           >
-            Veritabanı oluştur
+            Veritabanı (tablo / board)
           </button>
           <button
             type="button"
@@ -671,6 +679,27 @@ function Breadcrumb({ pages, pageId }: { pages: PageNode[]; pageId: string }) {
   );
 }
 
+function blockLabel(b: { type: string; props: Record<string, unknown> }, index: number) {
+  const TYPE: Record<string, string> = {
+    heading: 'Başlık',
+    paragraph: 'Paragraf',
+    bullet: 'Madde',
+    todo: 'Yapılacak',
+    quote: 'Alıntı',
+    code: 'Kod',
+    divider: 'Ayırıcı',
+    image: 'Görsel',
+    drawing: 'Çizim',
+  };
+  const kind = TYPE[b.type] || 'Blok';
+  const raw = String(b.props.text ?? b.props.alt ?? '').replace(/\s+/g, ' ').trim();
+  if (raw) return `${kind}: ${raw.slice(0, 56)}${raw.length > 56 ? '…' : ''}`;
+  if (b.type === 'image') return `${kind} ${index + 1}`;
+  if (b.type === 'drawing') return `${kind} ${index + 1}`;
+  if (b.type === 'divider') return `${kind}`;
+  return `${kind} ${index + 1} (boş)`;
+}
+
 function Comments({
   pageId,
   currentUserId,
@@ -699,43 +728,48 @@ function Comments({
       ).data,
   });
 
+  const commentable = blocks.filter((b) => b.type !== 'divider');
+
   return (
     <section className="mt-10 border-t pt-4">
       <h3 className="text-sm font-semibold uppercase text-slate-500">
         Yorumlar · {comments.length}
       </h3>
       <ul className="mt-2 space-y-2">
-        {comments.map((c) => (
-          <li key={c.id} className="rounded-lg border bg-white/80 px-3 py-2 text-sm">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <span className="font-medium">{c.author.fullName}</span>
-                <span className="ml-2 text-[10px] text-slate-400">
-                  {new Date(c.createdAt).toLocaleString('tr-TR')}
-                </span>
-                {c.blockId && (
-                  <span className="ml-2 text-[10px] text-accent">
-                    blok:{' '}
-                    {blocks.find((b) => b.id === c.blockId)?.type || c.blockId.slice(0, 6)}
+        {comments.map((c) => {
+          const bi = commentable.findIndex((b) => b.id === c.blockId);
+          const blk = bi >= 0 ? commentable[bi] : blocks.find((b) => b.id === c.blockId);
+          return (
+            <li key={c.id} className="rounded-lg border bg-white/80 px-3 py-2 text-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <span className="font-medium">{c.author.fullName}</span>
+                  <span className="ml-2 text-[10px] text-slate-400">
+                    {new Date(c.createdAt).toLocaleString('tr-TR')}
                   </span>
+                  {c.blockId && blk && (
+                    <span className="ml-2 text-[10px] text-accent">
+                      → {blockLabel(blk, bi >= 0 ? bi : 0)}
+                    </span>
+                  )}
+                  <p className="mt-0.5">{c.body}</p>
+                </div>
+                {c.author.id === currentUserId && (
+                  <button
+                    type="button"
+                    className="text-xs text-red-600"
+                    onClick={async () => {
+                      await api.delete(`/pages/${pageId}/comments/${c.id}`);
+                      void qc.invalidateQueries({ queryKey: ['comments', pageId] });
+                    }}
+                  >
+                    Sil
+                  </button>
                 )}
-                <p className="mt-0.5">{c.body}</p>
               </div>
-              {c.author.id === currentUserId && (
-                <button
-                  type="button"
-                  className="text-xs text-red-600"
-                  onClick={async () => {
-                    await api.delete(`/pages/${pageId}/comments/${c.id}`);
-                    void qc.invalidateQueries({ queryKey: ['comments', pageId] });
-                  }}
-                >
-                  Sil
-                </button>
-              )}
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
         {!comments.length && (
           <li className="text-xs text-slate-500">Henüz yorum yok.</li>
         )}
@@ -754,15 +788,18 @@ function Comments({
           void qc.invalidateQueries({ queryKey: ['comments', pageId] });
         }}
       >
+        <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+          Yorum nereye?
+        </label>
         <select
-          className="w-full rounded border px-2 py-1 text-xs"
+          className="w-full rounded border px-2 py-1.5 text-sm"
           value={blockId}
           onChange={(e) => setBlockId(e.target.value)}
         >
-          <option value="">Sayfa yorumu (blok yok)</option>
-          {blocks.map((b) => (
+          <option value="">Tüm sayfa</option>
+          {commentable.map((b, i) => (
             <option key={b.id} value={b.id}>
-              {b.type}: {String(b.props.text || b.props.sceneId || b.id).slice(0, 40)}
+              {blockLabel(b, i)}
             </option>
           ))}
         </select>

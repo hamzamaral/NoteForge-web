@@ -160,7 +160,8 @@ export function DatabaseView({ pageId }: { pageId: string }) {
   if (!db) {
     return (
       <p className="text-sm text-slate-500">
-        Bu sayfa bir veritabanı değil. Sidebar’dan “Veritabanı oluştur” deneyin.
+        Bu sayfa bir veritabanı değil. Sidebar’dan{' '}
+        <strong>Veritabanı (tablo / board)</strong> ile Notion tarzı satır+özellik sayfası aç.
       </p>
     );
   }
@@ -236,6 +237,10 @@ export function DatabaseView({ pageId }: { pageId: string }) {
 
   return (
     <div className="space-y-3">
+      <p className="text-xs text-slate-500">
+        Bu bir <strong>veritabanı sayfası</strong>: satırlar + özellikler. Tablo veya board görünümü;
+        normal not sayfasından farklıdır.
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
           className="font-display bg-transparent text-xl font-semibold outline-none"
