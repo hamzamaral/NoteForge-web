@@ -1,48 +1,161 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, getErrorMessage } from '@/lib/api';
 import { toast } from 'sonner';
 
+type Prop = {
+  id: string;
+  name: string;
+  type: string;
+  options?: string[] | unknown;
+};
+type View = {
+  id: string;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+};
+type Row = { id: string; values: Record<string, unknown> };
 type Db = {
   id: string;
   name: string;
-  properties: { id: string; name: string; type: string; options?: string[] }[];
-  views: { id: string; name: string; type: string; config: Record<string, unknown> }[];
-  rows: { id: string; values: Record<string, unknown> }[];
+  properties: Prop[];
+  views: View[];
+  rows: Row[];
 };
+
+function optsOf(p: Prop): string[] {
+  return Array.isArray(p.options) ? (p.options as string[]) : [];
+}
 
 export function DatabaseView({ pageId }: { pageId: string }) {
   const qc = useQueryClient();
   const [viewType, setViewType] = useState<'table' | 'board'>('table');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [sortBy, setSortBy] = useState('Ad');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [newPropName, setNewPropName] = useState('');
+  const [newPropType, setNewPropType] = useState('text');
+  const [dragRowId, setDragRowId] = useState<string | null>(null);
+
   const { data: db } = useQuery({
     queryKey: ['db-by-page', pageId],
     queryFn: async () => (await api.get<Db | null>(`/databases/by-page/${pageId}`)).data,
   });
 
+  const tableView = db?.views.find((v) => v.type === 'table');
+  const boardView = db?.views.find((v) => v.type === 'board');
+  const statusProp = db?.properties.find((p) => p.type === 'select' && p.name === 'Durum');
+  const groupBy = String(boardView?.config?.groupBy || statusProp?.name || 'Durum');
+
+  useEffect(() => {
+    if (!tableView?.config) return;
+    if (typeof tableView.config.sortBy === 'string') setSortBy(tableView.config.sortBy);
+    if (tableView.config.sortDir === 'asc' || tableView.config.sortDir === 'desc') {
+      setSortDir(tableView.config.sortDir);
+    }
+    const f = tableView.config.filter as { Durum?: string } | undefined;
+    if (f?.Durum) setFilterStatus(f.Durum);
+  }, [tableView?.id]);
+
+  const invalidate = () => void qc.invalidateQueries({ queryKey: ['db-by-page', pageId] });
+
   const addRow = useMutation({
-    mutationFn: () =>
-      api.post(`/databases/${db!.id}/rows`, {
-        values: { Ad: 'Yeni', Durum: 'Yeni' },
-      }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['db-by-page', pageId] }),
+    mutationFn: () => api.post(`/databases/${db!.id}/rows`, { values: {} }),
+    onSuccess: invalidate,
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const updateRow = useMutation({
     mutationFn: ({ id, values }: { id: string; values: Record<string, unknown> }) =>
       api.patch(`/databases/rows/${id}`, { values }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ['db-by-page', pageId] }),
+    onSuccess: invalidate,
   });
 
+  const deleteRow = useMutation({
+    mutationFn: (id: string) => api.delete(`/databases/rows/${id}`),
+    onSuccess: invalidate,
+  });
+
+  const addProperty = useMutation({
+    mutationFn: () =>
+      api.post(`/databases/${db!.id}/properties`, {
+        name: newPropName.trim(),
+        type: newPropType,
+        options: newPropType === 'select' ? ['A', 'B', 'C'] : [],
+      }),
+    onSuccess: () => {
+      setNewPropName('');
+      invalidate();
+      toast.success('Kolon eklendi');
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const deleteProperty = useMutation({
+    mutationFn: (id: string) => api.delete(`/databases/properties/${id}`),
+    onSuccess: invalidate,
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const renameDb = useMutation({
+    mutationFn: (name: string) => api.patch(`/databases/${db!.id}`, { name }),
+    onSuccess: () => {
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ['pages'] });
+    },
+  });
+
+  const saveViewConfig = useMutation({
+    mutationFn: () => {
+      const view = viewType === 'table' ? tableView : boardView;
+      if (!view) return Promise.resolve(null);
+      return api.patch(`/databases/views/${view.id}`, {
+        config: {
+          sortBy,
+          sortDir,
+          groupBy,
+          filter: filterStatus ? { Durum: filterStatus } : {},
+        },
+      });
+    },
+    onSuccess: () => toast.message('Görünüm kaydedildi'),
+  });
+
+  const rows = useMemo(() => {
+    if (!db) return [];
+    let list = [...db.rows];
+    if (filterStatus) {
+      list = list.filter((r) => String(r.values.Durum || '') === filterStatus);
+    }
+    list.sort((a, b) => {
+      const av = a.values[sortBy];
+      const bv = b.values[sortBy];
+      const as = av == null ? '' : String(av);
+      const bs = bv == null ? '' : String(bv);
+      const an = Number(av);
+      const bn = Number(bv);
+      let cmp = 0;
+      if (!Number.isNaN(an) && !Number.isNaN(bn) && as !== '' && bs !== '') cmp = an - bn;
+      else cmp = as.localeCompare(bs, 'tr');
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return list;
+  }, [db, filterStatus, sortBy, sortDir]);
+
   const groups = useMemo(() => {
-    if (!db) return {};
-    const map: Record<string, typeof db.rows> = {};
-    for (const row of db.rows) {
-      const key = String(row.values.Durum || '—');
+    if (!db) return {} as Record<string, Row[]>;
+    const options = statusProp ? optsOf(statusProp) : ['Yeni', 'Devam', 'Bitti'];
+    const map: Record<string, Row[]> = {};
+    for (const o of options) map[o] = [];
+    map['—'] = [];
+    for (const row of rows) {
+      const key = String(row.values[groupBy] || '—');
       (map[key] ||= []).push(row);
     }
+    if (!map['—'].length) delete map['—'];
     return map;
-  }, [db]);
+  }, [db, rows, groupBy, statusProp]);
 
   if (!db) {
     return (
@@ -52,10 +165,83 @@ export function DatabaseView({ pageId }: { pageId: string }) {
     );
   }
 
+  function cellEditor(p: Prop, row: Row) {
+    const value = row.values[p.name];
+    if (p.type === 'select') {
+      return (
+        <select
+          className="w-full rounded border px-1"
+          value={String(value ?? '')}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: e.target.value },
+            })
+          }
+        >
+          {optsOf(p).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (p.type === 'number') {
+      return (
+        <input
+          type="number"
+          className="w-full rounded border px-1"
+          value={value === undefined || value === null ? '' : String(value)}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: {
+                ...row.values,
+                [p.name]: e.target.value === '' ? null : Number(e.target.value),
+              },
+            })
+          }
+        />
+      );
+    }
+    if (p.type === 'date') {
+      return (
+        <input
+          type="date"
+          className="w-full rounded border px-1"
+          value={String(value || '')}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: e.target.value },
+            })
+          }
+        />
+      );
+    }
+    return (
+      <input
+        className="w-full rounded border px-1"
+        value={String(value ?? '')}
+        onChange={(e) =>
+          updateRow.mutate({
+            id: row.id,
+            values: { ...row.values, [p.name]: e.target.value },
+          })
+        }
+      />
+    );
+  }
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="font-display text-xl font-semibold">{db.name}</h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          className="font-display bg-transparent text-xl font-semibold outline-none"
+          value={db.name}
+          onChange={(e) => renameDb.mutate(e.target.value)}
+        />
         <button
           type="button"
           className={`rounded px-2 py-1 text-xs ${viewType === 'table' ? 'bg-accent text-white' : 'bg-panel'}`}
@@ -70,6 +256,43 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         >
           Board
         </button>
+        <select
+          className="rounded border px-1 text-xs"
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+        >
+          <option value="">Durum: tümü</option>
+          {(statusProp ? optsOf(statusProp) : []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+        <select
+          className="rounded border px-1 text-xs"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+        >
+          {db.properties.map((p) => (
+            <option key={p.id} value={p.name}>
+              Sıra: {p.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="rounded border px-2 py-1 text-xs"
+          onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+        >
+          {sortDir === 'asc' ? '↑' : '↓'}
+        </button>
+        <button
+          type="button"
+          className="rounded border px-2 py-1 text-xs"
+          onClick={() => saveViewConfig.mutate()}
+        >
+          Görünümü kaydet
+        </button>
         <button
           type="button"
           className="ml-auto rounded border px-2 py-1 text-xs"
@@ -79,6 +302,37 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         </button>
       </div>
 
+      <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-panel/40 p-2 text-xs">
+        <label>
+          Yeni kolon
+          <input
+            className="ml-1 rounded border px-1 py-0.5"
+            placeholder="İsim"
+            value={newPropName}
+            onChange={(e) => setNewPropName(e.target.value)}
+          />
+        </label>
+        <select
+          className="rounded border px-1 py-0.5"
+          value={newPropType}
+          onChange={(e) => setNewPropType(e.target.value)}
+        >
+          <option value="text">text</option>
+          <option value="number">number</option>
+          <option value="select">select</option>
+          <option value="date">date</option>
+        </select>
+        <button
+          type="button"
+          className="rounded bg-accent px-2 py-1 text-white"
+          disabled={!newPropName.trim()}
+          onClick={() => addProperty.mutate()}
+        >
+          Ekle
+        </button>
+        <span className="text-slate-400">· kolon silmek için başlıktaki ×</span>
+      </div>
+
       {viewType === 'table' ? (
         <div className="overflow-x-auto border bg-white">
           <table className="min-w-full text-sm">
@@ -86,61 +340,89 @@ export function DatabaseView({ pageId }: { pageId: string }) {
               <tr>
                 {db.properties.map((p) => (
                   <th key={p.id} className="px-3 py-2">
-                    {p.name}
+                    <span className="inline-flex items-center gap-1">
+                      {p.name}
+                      <span className="font-normal normal-case text-slate-400">{p.type}</span>
+                      {p.name !== 'Ad' && (
+                        <button
+                          type="button"
+                          className="text-red-500"
+                          title="Kolonu sil"
+                          onClick={() => {
+                            if (confirm(`“${p.name}” kolonu silinsin mi?`)) {
+                              deleteProperty.mutate(p.id);
+                            }
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </span>
                   </th>
                 ))}
+                <th className="px-2 py-2" />
               </tr>
             </thead>
             <tbody>
-              {db.rows.map((row) => (
+              {rows.map((row) => (
                 <tr key={row.id} className="border-t">
                   {db.properties.map((p) => (
                     <td key={p.id} className="px-3 py-2">
-                      {p.type === 'select' ? (
-                        <select
-                          className="rounded border px-1"
-                          value={String(row.values[p.name] ?? '')}
-                          onChange={(e) =>
-                            updateRow.mutate({
-                              id: row.id,
-                              values: { ...row.values, [p.name]: e.target.value },
-                            })
-                          }
-                        >
-                          {(p.options as string[] | undefined)?.map((o) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          )) || null}
-                        </select>
-                      ) : (
-                        <input
-                          className="w-full rounded border px-1"
-                          value={String(row.values[p.name] ?? '')}
-                          onChange={(e) =>
-                            updateRow.mutate({
-                              id: row.id,
-                              values: { ...row.values, [p.name]: e.target.value },
-                            })
-                          }
-                        />
-                      )}
+                      {cellEditor(p, row)}
                     </td>
                   ))}
+                  <td className="px-2 py-2">
+                    <button
+                      type="button"
+                      className="text-xs text-red-600"
+                      onClick={() => deleteRow.mutate(row.id)}
+                    >
+                      Sil
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {!rows.length && (
+            <p className="p-4 text-sm text-slate-500">Filtreye uyan satır yok.</p>
+          )}
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-3">
-          {Object.entries(groups).map(([status, rows]) => (
-            <div key={status} className="rounded-xl border bg-white p-2">
-              <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">{status}</h3>
+          {Object.entries(groups).map(([status, groupRows]) => (
+            <div
+              key={status}
+              className="min-h-[140px] rounded-xl border bg-white p-2"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => {
+                if (!dragRowId) return;
+                const row = db.rows.find((r) => r.id === dragRowId);
+                if (!row) return;
+                updateRow.mutate({
+                  id: row.id,
+                  values: { ...row.values, [groupBy]: status === '—' ? '' : status },
+                });
+                setDragRowId(null);
+              }}
+            >
+              <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">
+                {status} · {groupRows.length}
+              </h3>
               <ul className="space-y-2">
-                {rows.map((row) => (
-                  <li key={row.id} className="rounded-lg bg-panel px-2 py-2 text-sm">
-                    {String(row.values.Ad || '—')}
+                {groupRows.map((row) => (
+                  <li
+                    key={row.id}
+                    draggable
+                    onDragStart={() => setDragRowId(row.id)}
+                    className="cursor-grab rounded-lg bg-panel px-2 py-2 text-sm active:cursor-grabbing"
+                  >
+                    <div className="font-medium">{String(row.values.Ad || '—')}</div>
+                    {row.values.Öncelik != null && (
+                      <div className="text-[10px] text-slate-500">
+                        Öncelik: {String(row.values.Öncelik)}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>

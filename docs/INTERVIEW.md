@@ -20,6 +20,9 @@ Typing `@` opens a page picker; insert `@[Title](uuid)`. On save we parse mentio
 ### How do drawings and templates differ from Notion?
 Drawing blocks embed Excalidraw JSON in block `props.scene`. Templates (`blank`, `meeting`, `project`, `brainstorm`, `weekly`) are server-side recipes. Markdown import parses headings/lists/todos into blocks via `POST /pages/import.md`.
 
+### How are databases modeled?
+A Database is linked 1:1 to a Page. Properties (`text|number|select|date`) and Views (`table|board` + JSON config) are first-class. Rows store a JSON `values` map keyed by property name. Board drag updates the group-by select field; table filter/sort can be persisted on the view.
+
 ### How do you handle concurrent edits?
 Phase 1–5: **optimistic version** on `Page.contentVersion`. Conflicting PATCH returns 409. Phase 6: Yjs CRDT relay over Socket.IO for true multiplayer.
 
