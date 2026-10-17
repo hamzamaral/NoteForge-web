@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-paper text-ink antialiased;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 10% -10%, rgba(15, 118, 110, 0.08), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 0%, rgba(180, 140, 80, 0.06), transparent);
+}
+
+.ProseMirror {
+  outline: none;
+  min-height: 60vh;
+}
+
+.ProseMirror p.is-editor-empty:first-child::before {
+  color: #94a3b8;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.ProseMirror h1 {
+  @apply font-display text-3xl font-semibold mt-6 mb-2;
+}
+.ProseMirror h2 {
+  @apply font-display text-2xl font-semibold mt-5 mb-2;
+}
+.ProseMirror h3 {
+  @apply text-xl font-semibold mt-4 mb-1;
+}
+.ProseMirror ul {
+  @apply list-disc pl-6 my-2;
+}
+.ProseMirror ol {
+  @apply list-decimal pl-6 my-2;
+}
+.ProseMirror blockquote {
+  @apply border-l-4 border-accent/40 pl-3 italic text-slate-600 my-2;
+}
+.ProseMirror pre {
+  @apply bg-slate-900 text-slate-100 rounded-lg p-3 text-sm overflow-x-auto my-2;
+}
+.ProseMirror hr {
+  @apply my-6 border-slate-200;
+}
+.ProseMirror ul[data-type='taskList'] {
+  @apply list-none pl-0;
+}
+.ProseMirror ul[data-type='taskList'] li {
+  @apply flex items-start gap-2;
+}

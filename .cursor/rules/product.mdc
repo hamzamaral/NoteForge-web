@@ -1,0 +1,9 @@
+---
+description: NoteForge product scope
+globs:
+alwaysApply: true
+---
+# Product
+NoteForge = block notes + page tasks + drawing + databases (phased).
+Do not add features outside the current roadmap phase without updating docs/ROADMAP.md and docs/INTERVIEW.md.
+UI language: Turkish. GitHub org/user: always hamzamaral.

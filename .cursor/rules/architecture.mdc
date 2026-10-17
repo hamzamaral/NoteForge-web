@@ -1,0 +1,11 @@
+---
+description: API/web boundaries
+globs:
+alwaysApply: true
+---
+# Architecture
+- API: NestJS modules under src/modules; Prisma for persistence
+- Web: React + TipTap; serialize via src/lib/blocks.ts
+- Every entity scoped by workspaceId; use WorkspaceAccessService
+- Autosave uses Page.contentVersion optimistic lock (409 on conflict)
+- Realtime is Socket.IO namespace /sync — do not invent a second protocol

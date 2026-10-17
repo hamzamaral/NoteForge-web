@@ -1,0 +1,7 @@
+---
+description: Keep interview docs current
+globs:
+alwaysApply: true
+---
+# Interview docs
+Meaningful architecture decisions → add 2–3 sentences to docs/INTERVIEW.md and an ADR if needed.

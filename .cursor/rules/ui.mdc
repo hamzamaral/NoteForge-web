@@ -1,0 +1,9 @@
+---
+description: UI densitesi
+globs: ["**/src/**/*.tsx"]
+alwaysApply: false
+---
+# UI
+Notion-like densite: sidebar + full-bleed editor, few cards.
+Empty page must show clickable placeholder paragraph.
+Turkish copy. Brand NoteForge is visible in shell.

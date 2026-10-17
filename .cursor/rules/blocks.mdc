@@ -1,0 +1,11 @@
+---
+description: Block type checklist
+globs: ["**/blocks.ts","**/pages.service.ts","**/BLOCK_SCHEMA.md"]
+alwaysApply: false
+---
+# Blocks
+Adding a block type requires:
+1. docs/BLOCK_SCHEMA.md entry
+2. blocksToDoc + docToBlocks mapping
+3. Slash menu item (if user-insertable)
+4. Export markdown branch

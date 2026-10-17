@@ -1,0 +1,10 @@
+---
+description: Security defaults
+globs:
+alwaysApply: true
+---
+# Security
+- JWT on private routes
+- Membership check before page/task/db mutations
+- Public share is read-only via token
+- Never commit .env or real secrets
