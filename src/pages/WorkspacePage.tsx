@@ -144,7 +144,7 @@ export function WorkspacePage() {
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ['pages'] });
       navigate(`/p/${res.data.pageId}`);
-      toast.success('Veritabanı hazır — tablo ve board görünümleri');
+      toast.success('Tablo sayfası açıldı (Postgres değil — uygulama içi)');
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -336,17 +336,21 @@ export function WorkspacePage() {
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            title="Notion tarzı tablo + board: satırlar, özellikler, sürükle-bırak"
+            title="Uygulama içi tablo sayfası ekler. Postgres’i silmez / değiştirmez."
             onClick={() => {
-              const name = window.prompt(
-                'Veritabanı adı\n(Tablo ve board görünümü olan özel bir sayfa açılır)',
-                'Proje listesi',
+              const ok = window.confirm(
+                'Tablo sayfası eklensin mi?\n\n' +
+                  '• Bu, Notion’daki gibi satır + özellik + board sayfasıdır\n' +
+                  '• Gerçek Postgres veritabanını SİLMEZ / oluşturmaz\n' +
+                  '• İstersen sonra çöp kutusuna atabilirsin',
               );
+              if (!ok) return;
+              const name = window.prompt('Tablo sayfası adı', 'Proje listesi');
               if (name === null) return;
               createDb.mutate(name.trim() || 'Proje listesi');
             }}
           >
-            Veritabanı (tablo / board)
+            Tablo sayfası ekle
           </button>
           <button
             type="button"

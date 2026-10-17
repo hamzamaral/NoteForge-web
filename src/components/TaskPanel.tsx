@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage, type Task } from '@/lib/api';
+import { DateField } from '@/components/DateField';
+import { fromDateInputValue } from '@/lib/dates';
 import { useMemo, useState } from 'react';
 
 const STATUS_LABEL: Record<Task['status'], string> = {
@@ -124,7 +126,12 @@ export function TaskPanel({
         className="mt-2 space-y-1"
         onSubmit={(e) => {
           e.preventDefault();
-          if (title.trim()) create.mutate({ title: title.trim(), dueAt: dueAt || undefined });
+          if (title.trim()) {
+            create.mutate({
+              title: title.trim(),
+              dueAt: fromDateInputValue(dueAt) || undefined,
+            });
+          }
         }}
       >
         <input
@@ -136,9 +143,10 @@ export function TaskPanel({
         <div className="flex gap-1">
           <input
             type="date"
-            className="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
+            className="min-w-0 flex-1 rounded border bg-white px-2 py-1.5 text-xs"
             value={dueAt}
             onChange={(e) => setDueAt(e.target.value)}
+            title="Bitiş tarihi"
           />
           <button type="submit" className="rounded bg-accent px-2 text-sm text-white">
             +
@@ -180,16 +188,11 @@ export function TaskPanel({
               <option value="DOING">Devam</option>
               <option value="DONE">Bitti</option>
             </select>
-            <input
-              type="date"
-              className="mt-1 w-full rounded border bg-white px-1 text-xs"
-              value={t.dueAt ? t.dueAt.slice(0, 10) : ''}
-              onChange={(e) =>
-                update.mutate({
-                  id: t.id,
-                  dueAt: e.target.value ? e.target.value : null,
-                })
-              }
+            <DateField
+              className="mt-1 w-full rounded border bg-white px-1 py-1 text-xs"
+              value={t.dueAt}
+              title="Bitiş tarihi"
+              onCommit={(iso) => update.mutate({ id: t.id, dueAt: iso })}
             />
           </li>
         ))}

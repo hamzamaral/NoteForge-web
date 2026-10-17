@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { api, getErrorMessage } from '@/lib/api';
+import { DateField } from '@/components/DateField';
+import { toDateInputValue } from '@/lib/dates';
 import { toast } from 'sonner';
 
 type Prop = {
@@ -160,8 +162,8 @@ export function DatabaseView({ pageId }: { pageId: string }) {
   if (!db) {
     return (
       <p className="text-sm text-slate-500">
-        Bu sayfa bir veritabanı değil. Sidebar’dan{' '}
-        <strong>Veritabanı (tablo / board)</strong> ile Notion tarzı satır+özellik sayfası aç.
+        Bu sayfa tablo değil. Sidebar’dan <strong>Tablo sayfası ekle</strong> ile Notion tarzı
+        satır+özellik sayfası aç (Postgres’e dokunmaz).
       </p>
     );
   }
@@ -208,14 +210,13 @@ export function DatabaseView({ pageId }: { pageId: string }) {
     }
     if (p.type === 'date') {
       return (
-        <input
-          type="date"
-          className="w-full rounded border px-1"
-          value={String(value || '')}
-          onChange={(e) =>
+        <DateField
+          className="w-full rounded border bg-white px-1 py-0.5 text-xs"
+          value={typeof value === 'string' ? value : toDateInputValue(value as string)}
+          onCommit={(iso) =>
             updateRow.mutate({
               id: row.id,
-              values: { ...row.values, [p.name]: e.target.value },
+              values: { ...row.values, [p.name]: iso ? iso.slice(0, 10) : '' },
             })
           }
         />
@@ -238,8 +239,8 @@ export function DatabaseView({ pageId }: { pageId: string }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-500">
-        Bu bir <strong>veritabanı sayfası</strong>: satırlar + özellikler. Tablo veya board görünümü;
-        normal not sayfasından farklıdır.
+        Uygulama içi <strong>tablo sayfası</strong> (Notion tarzı) — satırlar + özellikler + board.
+        Gerçek Postgres DB değil; silmek için sayfayı çöpe atman yeterli.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
