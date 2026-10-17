@@ -79,6 +79,11 @@ export type PageNode = {
   updatedAt: string;
   isFavorite?: boolean;
 };
+export type SearchHit = PageNode & {
+  match: 'title' | 'content' | 'task';
+  snippet: string | null;
+  score: number;
+};
 export type Block = {
   id: string;
   type: string;

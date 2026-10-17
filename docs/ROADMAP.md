@@ -9,4 +9,4 @@
 | 4 | Database table/board | ship + deepen (props, filter/sort, board drag) |
 | 5 | Share links, comments, invites | ship + deepen (share panel, members, block comments) |
 | 6 | Socket presence + Yjs relay | ship + deepen (JWT, room Y.Doc, TipTap caret) |
-| 7 | Search, INTERVIEW polish, README | ship |
+| 7 | Search, INTERVIEW polish, README | ship + deepen (Ctrl+K, snippets, ADR 0003) |

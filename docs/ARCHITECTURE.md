@@ -21,3 +21,4 @@ PostgreSQL
 4. Debounced autosave replaces block set, increments `contentVersion`
 5. Mentions create `PageLink` rows
 6. Join page room → JWT socket → `yjsSync` state + live `yjsUpdate` / caret awareness
+7. Search ranks title / task / block ILIKE → `{ match, snippet, score }`

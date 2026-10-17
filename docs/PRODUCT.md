@@ -12,8 +12,9 @@ Dağınık notlar, görev listeleri ve beyaz tahta çizimleri ayrı araçlarda k
 - **Backlink**: `[[page:uuid]]` mention
 - **Excalidraw** çizim bloğu (Notion’da zayıf olan alan)
 - **Database** table + board views
-- **Paylaşım** salt-okunur link, yorumlar, arama
-- **Realtime presence** (Socket.IO /sync)
+- **Paylaşım** salt-okunur link, yorumlar, üye davet
+- **Realtime** JWT Socket.IO + Yjs caret
+- **Arama** başlık / içerik / görev + Ctrl+K palet
 
 ## Repolar
 - https://github.com/hamzamaral/NoteForge-api

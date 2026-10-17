@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { api, getErrorMessage, type PageDetail, type PageNode, type Workspace } from '@/lib/api';
+import {
+  api,
+  getErrorMessage,
+  type PageDetail,
+  type PageNode,
+  type SearchHit,
+  type Workspace,
+} from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { BlockEditor } from '@/components/BlockEditor';
 import { TaskPanel } from '@/components/TaskPanel';
@@ -11,6 +18,7 @@ import { DatabaseView } from '@/components/DatabaseView';
 import { TemplateGallery } from '@/components/TemplateGallery';
 import { SharePanel } from '@/components/SharePanel';
 import { MembersPanel } from '@/components/MembersPanel';
+import { SearchPalette } from '@/components/SearchPalette';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
 import { getRecents, pushRecent } from '@/lib/recents';
@@ -21,6 +29,7 @@ export function WorkspacePage() {
   const { pageId } = useParams();
   const qc = useQueryClient();
   const [q, setQ] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -54,11 +63,22 @@ export function WorkspacePage() {
     enabled: !!workspaceId && q.trim().length > 1,
     queryFn: async () =>
       (
-        await api.get<PageNode[]>(`/workspaces/${workspaceId}/search`, {
+        await api.get<SearchHit[]>(`/workspaces/${workspaceId}/search`, {
           params: { q },
         })
       ).data,
   });
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const { data: page } = useQuery({
     queryKey: ['page', pageId],
@@ -206,12 +226,22 @@ export function WorkspacePage() {
           <p className="truncate text-xs text-slate-500">{workspaces[0]?.name}</p>
         </div>
         <div className="space-y-1 p-2">
-          <input
-            className="w-full rounded border px-2 py-1 text-sm"
-            placeholder="Ara…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          <div className="flex gap-1">
+            <input
+              className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
+              placeholder="Ara…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded border px-2 py-1 text-[10px] text-slate-500 hover:bg-panel"
+              title="Komut paleti (Ctrl+K)"
+              onClick={() => setSearchOpen(true)}
+            >
+              ⌘K
+            </button>
+          </div>
           <button
             type="button"
             className="w-full rounded bg-accent px-2 py-1.5 text-left text-sm text-white"
@@ -302,32 +332,55 @@ export function WorkspacePage() {
                 ))}
             </div>
           )}
-          {(q.trim().length > 1
-            ? searchHits.map((p) => ({ ...p, depth: 0 }))
-            : flattenTree(tree)
-          ).map((p) => (
-            <div
-              key={p.id}
-              className={`group flex items-center rounded ${
-                p.id === pageId ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
-              }`}
-              style={{ paddingLeft: 4 + p.depth * 12 }}
-            >
-              <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate px-2 py-1 text-sm">
-                {p.icon || '📄'} {p.title}
-              </Link>
-              <button
-                type="button"
-                title="Alt sayfa ekle"
-                className="mr-1 hidden rounded px-1 text-xs text-slate-400 group-hover:inline hover:text-accent"
-                onClick={() =>
-                  createPage.mutate({ parentId: p.id, title: 'Alt sayfa' })
-                }
+          {q.trim().length > 1 ? (
+            searchHits.length === 0 ? (
+              <p className="px-2 py-4 text-center text-xs text-slate-500">
+                Sonuç yok — ⌘K ile gelişmiş ara
+              </p>
+            ) : (
+              searchHits.map((p) => (
+                <Link
+                  key={p.id + p.match}
+                  to={`/p/${p.id}`}
+                  className={`block rounded px-2 py-1.5 hover:bg-panel ${
+                    p.id === pageId ? 'bg-accent/10 text-accent' : ''
+                  }`}
+                >
+                  <div className="truncate text-sm">
+                    {p.icon || '📄'} {p.title}
+                  </div>
+                  {p.snippet && (
+                    <p className="truncate pl-5 text-[10px] text-slate-500">{p.snippet}</p>
+                  )}
+                  <span className="pl-5 text-[9px] uppercase text-slate-400">{p.match}</span>
+                </Link>
+              ))
+            )
+          ) : (
+            flattenTree(tree).map((p) => (
+              <div
+                key={p.id}
+                className={`group flex items-center rounded ${
+                  p.id === pageId ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
+                }`}
+                style={{ paddingLeft: 4 + p.depth * 12 }}
               >
-                +
-              </button>
-            </div>
-          ))}
+                <Link to={`/p/${p.id}`} className="min-w-0 flex-1 truncate px-2 py-1 text-sm">
+                  {p.icon || '📄'} {p.title}
+                </Link>
+                <button
+                  type="button"
+                  title="Alt sayfa ekle"
+                  className="mr-1 hidden rounded px-1 text-xs text-slate-400 group-hover:inline hover:text-accent"
+                  onClick={() =>
+                    createPage.mutate({ parentId: p.id, title: 'Alt sayfa' })
+                  }
+                >
+                  +
+                </button>
+              </div>
+            ))
+          )}
         </nav>
         <div className="border-t p-2 text-xs">
           <button type="button" className="text-slate-600 underline" onClick={() => setShowTrash((v) => !v)}>
@@ -562,6 +615,12 @@ export function WorkspacePage() {
             <p className="text-slate-500">Sayfa seçin veya oluşturun.</p>
           )}
         </div>
+        <SearchPalette
+          open={searchOpen}
+          workspaceId={workspaceId}
+          onClose={() => setSearchOpen(false)}
+          onSelect={(id) => navigate(`/p/${id}`)}
+        />
         <TemplateGallery
           open={galleryOpen}
           onClose={() => setGalleryOpen(false)}
