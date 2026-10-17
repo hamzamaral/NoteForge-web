@@ -6,10 +6,13 @@ import TaskItem from '@tiptap/extension-task-item';
 import Image from '@tiptap/extension-image';
 import Dropcursor from '@tiptap/extension-dropcursor';
 import Gapcursor from '@tiptap/extension-gapcursor';
+import Collaboration from '@tiptap/extension-collaboration';
+import CollaborationCaret from '@tiptap/extension-collaboration-caret';
 import { TextSelection } from '@tiptap/pm/state';
 import { useEffect, useRef, useState } from 'react';
 import type { Block, PageNode } from '@/lib/api';
 import { blocksToDoc, docToBlocks } from '@/lib/blocks';
+import type { NoteForgeProvider } from '@/lib/sync';
 
 type SlashItem = {
   key: string;
@@ -54,12 +57,18 @@ const SLASH_ITEMS: SlashItem[] = [
   },
 ];
 
+export type CollabProps = {
+  provider: NoteForgeProvider;
+  user: { name: string; color: string };
+};
+
 type Props = {
   blocks: Block[];
   pages?: PageNode[];
   currentPageId?: string;
   onChange: (payload: ReturnType<typeof docToBlocks>) => void;
   onSaveState?: (state: 'idle' | 'saving' | 'saved') => void;
+  collab?: CollabProps | null;
 };
 
 type Popup = {
@@ -70,9 +79,10 @@ type Popup = {
   index: number;
 };
 
-export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSaveState }: Props) {
+export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSaveState, collab }: Props) {
   const [popup, setPopup] = useState<Popup | null>(null);
   const savingRef = useRef(false);
+  const seededRef = useRef(false);
   const debounce = useRef<number>();
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
@@ -80,137 +90,178 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
   popupRef.current = popup;
   const pagesRef = useRef(pages);
   pagesRef.current = pages;
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      Dropcursor.configure({ color: '#0f766e', width: 2 }),
-      Gapcursor,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Image.configure({
-        inline: false,
-        allowBase64: true,
-        HTMLAttributes: { class: 'nf-image rounded-lg max-w-full my-3' },
-      }),
-      Placeholder.configure({
-        placeholder: ({ node }) =>
-          node.type.name === 'heading'
-            ? 'Başlık…'
-            : 'Yaz…  / komut  ·  @ sayfa linki',
-        showOnlyCurrent: false,
-        includeChildren: true,
-      }),
-    ],
-    content: blocksToDoc(blocks),
-    editorProps: {
-      attributes: {
-        class: 'prose prose-slate max-w-none focus:outline-none px-1 min-h-[55vh] cursor-text',
-      },
-      handlePaste: (_view, event) => {
-        const ed = editorRef.current;
-        const items = event.clipboardData?.items;
-        if (!items || !ed) return false;
-        for (const item of items) {
-          if (!item.type.startsWith('image/')) continue;
-          const file = item.getAsFile();
-          if (!file) continue;
-          event.preventDefault();
-          const reader = new FileReader();
-          reader.onload = () => ed.chain().focus().setImage({ src: String(reader.result) }).run();
-          reader.readAsDataURL(file);
-          return true;
-        }
-        return false;
-      },
-      handleKeyDown: (_view, event) => {
-        const current = popupRef.current;
-        if (!current) return false;
-        if (event.key === 'Escape') {
-          setPopup(null);
-          return true;
-        }
-        const items =
-          current.kind === 'slash'
-            ? filterSlash(current.filter)
-            : filterMentions(current.filter);
-        if (!items.length) return false;
-        if (event.key === 'ArrowDown') {
-          event.preventDefault();
-          setPopup((s) => (s ? { ...s, index: (s.index + 1) % items.length } : s));
-          return true;
-        }
-        if (event.key === 'ArrowUp') {
-          event.preventDefault();
-          setPopup((s) =>
-            s ? { ...s, index: (s.index - 1 + items.length) % items.length } : s,
-          );
-          return true;
-        }
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          if (current.kind === 'slash') {
-            const item = (items as SlashItem[])[current.index];
-            if (item) applySlash(item);
-          } else {
-            const page = (items as PageNode[])[current.index];
-            if (page) applyMention(page);
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          // Collaboration provides its own undo; disable built-in history
+          undoRedo: collab ? false : undefined,
+        }),
+        Dropcursor.configure({ color: '#0f766e', width: 2 }),
+        Gapcursor,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Image.configure({
+          inline: false,
+          allowBase64: true,
+          HTMLAttributes: { class: 'nf-image rounded-lg max-w-full my-3' },
+        }),
+        Placeholder.configure({
+          placeholder: ({ node }) =>
+            node.type.name === 'heading'
+              ? 'Başlık…'
+              : 'Yaz…  / komut  ·  @ sayfa linki',
+          showOnlyCurrent: false,
+          includeChildren: true,
+        }),
+        ...(collab
+          ? [
+              Collaboration.configure({ document: collab.provider.doc }),
+              CollaborationCaret.configure({
+                provider: collab.provider,
+                user: collab.user,
+              }),
+            ]
+          : []),
+      ],
+      content: collab ? undefined : blocksToDoc(blocks),
+      editorProps: {
+        attributes: {
+          class: 'prose prose-slate max-w-none focus:outline-none px-1 min-h-[55vh] cursor-text',
+        },
+        handlePaste: (_view, event) => {
+          const ed = editorRef.current;
+          const items = event.clipboardData?.items;
+          if (!items || !ed) return false;
+          for (const item of items) {
+            if (!item.type.startsWith('image/')) continue;
+            const file = item.getAsFile();
+            if (!file) continue;
+            event.preventDefault();
+            const reader = new FileReader();
+            reader.onload = () => ed.chain().focus().setImage({ src: String(reader.result) }).run();
+            reader.readAsDataURL(file);
+            return true;
           }
-          return true;
+          return false;
+        },
+        handleKeyDown: (_view, event) => {
+          const current = popupRef.current;
+          if (!current) return false;
+          if (event.key === 'Escape') {
+            setPopup(null);
+            return true;
+          }
+          const items =
+            current.kind === 'slash'
+              ? filterSlash(current.filter)
+              : filterMentions(current.filter);
+          if (!items.length) return false;
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setPopup((s) => (s ? { ...s, index: (s.index + 1) % items.length } : s));
+            return true;
+          }
+          if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setPopup((s) =>
+              s ? { ...s, index: (s.index - 1 + items.length) % items.length } : s,
+            );
+            return true;
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            if (current.kind === 'slash') {
+              const item = (items as SlashItem[])[current.index];
+              if (item) applySlash(item);
+            } else {
+              const page = (items as PageNode[])[current.index];
+              if (page) applyMention(page);
+            }
+            return true;
+          }
+          return false;
+        },
+      },
+      onCreate: ({ editor: ed }) => {
+        editorRef.current = ed;
+      },
+      onUpdate: ({ editor: ed }) => {
+        const { from } = ed.state.selection;
+        const textBefore = ed.state.doc.textBetween(Math.max(0, from - 40), from, '\n');
+        const slashMatch = textBefore.match(/(?:^|\s)\/([^\s@]*)$/);
+        const mentionMatch = textBefore.match(/(?:^|\s)@([^\s]*)$/);
+        const coords = ed.view.coordsAtPos(from);
+        if (slashMatch) {
+          setPopup({
+            kind: 'slash',
+            top: coords.bottom + 6,
+            left: coords.left,
+            filter: slashMatch[1] || '',
+            index: 0,
+          });
+        } else if (mentionMatch) {
+          setPopup({
+            kind: 'mention',
+            top: coords.bottom + 6,
+            left: coords.left,
+            filter: mentionMatch[1] || '',
+            index: 0,
+          });
+        } else {
+          setPopup(null);
         }
-        return false;
+        onSaveState?.('saving');
+        window.clearTimeout(debounce.current);
+        debounce.current = window.setTimeout(() => {
+          if (savingRef.current) return;
+          onChange(docToBlocks(ed.getJSON()));
+          onSaveState?.('saved');
+          window.setTimeout(() => onSaveState?.('idle'), 1200);
+        }, 450);
       },
     },
-    onCreate: ({ editor: ed }) => {
-      editorRef.current = ed;
-    },
-    onUpdate: ({ editor: ed }) => {
-      const { from } = ed.state.selection;
-      const textBefore = ed.state.doc.textBetween(Math.max(0, from - 40), from, '\n');
-      const slashMatch = textBefore.match(/(?:^|\s)\/([^\s@]*)$/);
-      const mentionMatch = textBefore.match(/(?:^|\s)@([^\s]*)$/);
-      const coords = ed.view.coordsAtPos(from);
-      if (slashMatch) {
-        setPopup({
-          kind: 'slash',
-          top: coords.bottom + 6,
-          left: coords.left,
-          filter: slashMatch[1] || '',
-          index: 0,
-        });
-      } else if (mentionMatch) {
-        setPopup({
-          kind: 'mention',
-          top: coords.bottom + 6,
-          left: coords.left,
-          filter: mentionMatch[1] || '',
-          index: 0,
-        });
-      } else {
-        setPopup(null);
-      }
-      onSaveState?.('saving');
-      window.clearTimeout(debounce.current);
-      debounce.current = window.setTimeout(() => {
-        if (savingRef.current) return;
-        onChange(docToBlocks(ed.getJSON()));
-        onSaveState?.('saved');
-        window.setTimeout(() => onSaveState?.('idle'), 1200);
-      }, 450);
-    },
-  });
+    [collab?.provider, collab?.user.name, collab?.user.color],
+  );
 
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
 
+  // Seed Y.Doc from REST blocks once when room is empty after sync
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !collab) return;
+    seededRef.current = false;
+    const trySeed = () => {
+      if (seededRef.current || !editor) return;
+      const frag = collab.provider.doc.getXmlFragment('default');
+      if (frag.length > 0) {
+        seededRef.current = true;
+        return;
+      }
+      savingRef.current = true;
+      editor.commands.setContent(blocksToDoc(blocksRef.current), { emitUpdate: true });
+      savingRef.current = false;
+      seededRef.current = true;
+    };
+    if (collab.provider.synced) trySeed();
+    const off = collab.provider.onSynced(() => trySeed());
+    return () => {
+      off();
+    };
+  }, [editor, collab]);
+
+  // Non-collab: refresh from REST when block ids/types change
+  useEffect(() => {
+    if (!editor || collab) return;
     savingRef.current = true;
     editor.commands.setContent(blocksToDoc(blocks), { emitUpdate: false });
     savingRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blocks.map((b) => `${b.id}:${b.type}`).join('|')]);
+  }, [blocks.map((b) => `${b.id}:${b.type}`).join('|'), collab]);
 
   function filterSlash(filter: string) {
     const f = filter.toLowerCase();
@@ -334,6 +385,7 @@ export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSav
         </button>
         <span className="text-[11px] text-slate-400">
           / komut · @ sayfa · görsel yapıştır · ↑↓ blok
+          {collab ? ' · canlı birlikte yazma' : ''}
         </span>
         <input
           ref={fileRef}

@@ -66,7 +66,7 @@ export function WorkspacePage() {
     queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
   });
 
-  const { presence } = usePageSync(pageId, user);
+  const { presence, status: syncStatus, provider, myColor } = usePageSync(pageId, user);
 
   useEffect(() => {
     if (!pageId && pages[0]) navigate(`/p/${pages[0].id}`, { replace: true });
@@ -363,24 +363,47 @@ export function WorkspacePage() {
             <>
               <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <Breadcrumb pages={pages} pageId={page.id} />
-                <span className="ml-auto">
+                <span className="ml-auto flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/80 px-2 py-0.5 text-[10px]"
+                    title="Socket.IO /sync + Yjs"
+                  >
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${
+                        syncStatus === 'synced'
+                          ? 'bg-emerald-500'
+                          : syncStatus === 'connected' || syncStatus === 'connecting'
+                            ? 'bg-amber-400'
+                            : syncStatus === 'error'
+                              ? 'bg-red-500'
+                              : 'bg-slate-300'
+                      }`}
+                    />
+                    {syncStatus === 'synced'
+                      ? 'Canlı'
+                      : syncStatus === 'connecting'
+                        ? 'Bağlanıyor…'
+                        : syncStatus === 'connected'
+                          ? 'Senkron…'
+                          : syncStatus === 'error'
+                            ? 'Sync hata'
+                            : 'Çevrimdışı'}
+                  </span>
                   {saveState === 'saving' && 'Kaydediliyor…'}
                   {saveState === 'saved' && 'Kaydedildi'}
                 </span>
-                {presence.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    {presence.map((p) => (
-                      <span
-                        key={p.userId + p.color}
-                        title={p.name}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white"
-                        style={{ background: p.color }}
-                      >
-                        {p.name.slice(0, 1).toUpperCase()}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="flex items-center gap-1">
+                  {presence.map((p) => (
+                    <span
+                      key={(p.socketId || p.userId) + p.color}
+                      title={`${p.name}${p.userId === user?.id ? ' (sen)' : ''}`}
+                      className="inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[10px] font-semibold text-white ring-2 ring-white"
+                      style={{ background: p.color }}
+                    >
+                      {p.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  ))}
+                </div>
               </div>
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <input
@@ -479,11 +502,20 @@ export function WorkspacePage() {
               ) : (
                 <>
                   <BlockEditor
+                    key={page.id}
                     blocks={page.blocks.filter((b) => b.type !== 'drawing')}
                     pages={pages}
                     currentPageId={page.id}
                     onChange={(payload) => saveBlocks.mutate(payload)}
                     onSaveState={setSaveState}
+                    collab={
+                      provider && user
+                        ? {
+                            provider,
+                            user: { name: user.fullName, color: myColor },
+                          }
+                        : null
+                    }
                   />
                   {drawingBlocks.map((b) => (
                     <DrawingBlock

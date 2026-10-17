@@ -27,7 +27,7 @@ A Database is linked 1:1 to a Page. Properties (`text|number|select|date`) and V
 Page shares are token URLs (`/share/:token`) with READ/COMMENT permission — no JWT. Workspace members use OWNER/EDITOR/VIEWER; invite by existing user email; only OWNER removes members. Comments can optionally attach to a `blockId`.
 
 ### How do you handle concurrent edits?
-Phase 1–5: **optimistic version** on `Page.contentVersion`. Conflicting PATCH returns 409. Phase 6: Yjs CRDT relay over Socket.IO for true multiplayer.
+Phase 1–5: **optimistic version** on `Page.contentVersion`. Conflicting PATCH returns 409. Phase 6 deepen: Socket.IO `/sync` requires JWT; each page room keeps an in-memory `Y.Doc`; clients exchange `yjsSync` / `yjsUpdate` + `awarenessUpdate`. TipTap `Collaboration` + `CollaborationCaret` show remote carets; REST autosave remains the durable store when the last peer leaves the room.
 
 ### How is multi-tenant isolation done?
 Every page/task/db row belongs to a `workspaceId`. Guards resolve membership (`WorkspaceMember`) before any mutation. Share links are token-scoped read APIs without JWT.

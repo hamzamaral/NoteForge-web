@@ -5,7 +5,7 @@ Web (Vite React :5174)
   TipTap editor → PATCH /pages/:id/blocks (versioned)
   TaskPanel → /tasks
   DatabaseView → /databases
-  Socket.IO → /sync (presence + yjsUpdate relay)
+  Socket.IO → /sync (JWT, presence, Y.Doc room, awareness)
         │
 API (NestJS :3001 /api/v1)
   Auth JWT · Workspaces · Pages/Blocks · Tasks
@@ -20,3 +20,4 @@ PostgreSQL
 3. Load page + blocks + backlinks
 4. Debounced autosave replaces block set, increments `contentVersion`
 5. Mentions create `PageLink` rows
+6. Join page room → JWT socket → `yjsSync` state + live `yjsUpdate` / caret awareness
