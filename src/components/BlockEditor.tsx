@@ -8,7 +8,7 @@ import Dropcursor from '@tiptap/extension-dropcursor';
 import Gapcursor from '@tiptap/extension-gapcursor';
 import { TextSelection } from '@tiptap/pm/state';
 import { useEffect, useRef, useState } from 'react';
-import type { Block } from '@/lib/api';
+import type { Block, PageNode } from '@/lib/api';
 import { blocksToDoc, docToBlocks } from '@/lib/blocks';
 
 type SlashItem = {
@@ -56,23 +56,30 @@ const SLASH_ITEMS: SlashItem[] = [
 
 type Props = {
   blocks: Block[];
+  pages?: PageNode[];
+  currentPageId?: string;
   onChange: (payload: ReturnType<typeof docToBlocks>) => void;
   onSaveState?: (state: 'idle' | 'saving' | 'saved') => void;
 };
 
-export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
-  const [slash, setSlash] = useState<{
-    top: number;
-    left: number;
-    filter: string;
-    index: number;
-  } | null>(null);
+type Popup = {
+  kind: 'slash' | 'mention';
+  top: number;
+  left: number;
+  filter: string;
+  index: number;
+};
+
+export function BlockEditor({ blocks, pages = [], currentPageId, onChange, onSaveState }: Props) {
+  const [popup, setPopup] = useState<Popup | null>(null);
   const savingRef = useRef(false);
   const debounce = useRef<number>();
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
-  const slashRef = useRef(slash);
-  slashRef.current = slash;
+  const popupRef = useRef(popup);
+  popupRef.current = popup;
+  const pagesRef = useRef(pages);
+  pagesRef.current = pages;
 
   const editor = useEditor({
     extensions: [
@@ -90,7 +97,7 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
         placeholder: ({ node }) =>
           node.type.name === 'heading'
             ? 'Başlık…'
-            : 'Boş satıra tıkla ve yaz, veya / ile komut…',
+            : 'Yaz…  / komut  ·  @ sayfa linki',
         showOnlyCurrent: false,
         includeChildren: true,
       }),
@@ -117,40 +124,37 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
         return false;
       },
       handleKeyDown: (_view, event) => {
-        const current = slashRef.current;
+        const current = popupRef.current;
         if (!current) return false;
         if (event.key === 'Escape') {
-          setSlash(null);
+          setPopup(null);
           return true;
         }
-        const filtered = filterSlash(current.filter);
-        if (!filtered.length) return false;
+        const items =
+          current.kind === 'slash'
+            ? filterSlash(current.filter)
+            : filterMentions(current.filter);
+        if (!items.length) return false;
         if (event.key === 'ArrowDown') {
           event.preventDefault();
-          setSlash((s) => (s ? { ...s, index: (s.index + 1) % filtered.length } : s));
+          setPopup((s) => (s ? { ...s, index: (s.index + 1) % items.length } : s));
           return true;
         }
         if (event.key === 'ArrowUp') {
           event.preventDefault();
-          setSlash((s) =>
-            s ? { ...s, index: (s.index - 1 + filtered.length) % filtered.length } : s,
+          setPopup((s) =>
+            s ? { ...s, index: (s.index - 1 + items.length) % items.length } : s,
           );
           return true;
         }
         if (event.key === 'Enter') {
           event.preventDefault();
-          const item = filtered[current.index];
-          if (item && editorRef.current) {
-            const ed = editorRef.current;
-            const { from } = ed.state.selection;
-            const textBefore = ed.state.doc.textBetween(Math.max(0, from - 24), from, '\n');
-            const match = textBefore.match(/(?:^|\s)\/([^\s]*)$/);
-            if (match) {
-              const token = match[0].trimStart();
-              ed.chain().focus().deleteRange({ from: from - token.length, to: from }).run();
-            }
-            item.run(ed);
-            setSlash(null);
+          if (current.kind === 'slash') {
+            const item = (items as SlashItem[])[current.index];
+            if (item) applySlash(item);
+          } else {
+            const page = (items as PageNode[])[current.index];
+            if (page) applyMention(page);
           }
           return true;
         }
@@ -162,18 +166,28 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
     },
     onUpdate: ({ editor: ed }) => {
       const { from } = ed.state.selection;
-      const textBefore = ed.state.doc.textBetween(Math.max(0, from - 24), from, '\n');
-      const match = textBefore.match(/(?:^|\s)\/([^\s]*)$/);
-      if (match) {
-        const coords = ed.view.coordsAtPos(from);
-        setSlash({
+      const textBefore = ed.state.doc.textBetween(Math.max(0, from - 40), from, '\n');
+      const slashMatch = textBefore.match(/(?:^|\s)\/([^\s@]*)$/);
+      const mentionMatch = textBefore.match(/(?:^|\s)@([^\s]*)$/);
+      const coords = ed.view.coordsAtPos(from);
+      if (slashMatch) {
+        setPopup({
+          kind: 'slash',
           top: coords.bottom + 6,
           left: coords.left,
-          filter: match[1] || '',
+          filter: slashMatch[1] || '',
+          index: 0,
+        });
+      } else if (mentionMatch) {
+        setPopup({
+          kind: 'mention',
+          top: coords.bottom + 6,
+          left: coords.left,
+          filter: mentionMatch[1] || '',
           index: 0,
         });
       } else {
-        setSlash(null);
+        setPopup(null);
       }
       onSaveState?.('saving');
       window.clearTimeout(debounce.current);
@@ -208,17 +222,42 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
     );
   }
 
+  function filterMentions(filter: string) {
+    const f = filter.toLowerCase();
+    return pagesRef.current
+      .filter((p) => p.id !== currentPageId)
+      .filter((p) => !f || p.title.toLowerCase().includes(f))
+      .slice(0, 12);
+  }
+
   function applySlash(item: SlashItem) {
     if (!editor) return;
     const { from } = editor.state.selection;
     const textBefore = editor.state.doc.textBetween(Math.max(0, from - 24), from, '\n');
-    const match = textBefore.match(/(?:^|\s)\/([^\s]*)$/);
+    const match = textBefore.match(/(?:^|\s)\/([^\s@]*)$/);
     if (match) {
       const token = match[0].trimStart();
       editor.chain().focus().deleteRange({ from: from - token.length, to: from }).run();
     }
     item.run(editor);
-    setSlash(null);
+    setPopup(null);
+  }
+
+  function applyMention(page: PageNode) {
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    const textBefore = editor.state.doc.textBetween(Math.max(0, from - 40), from, '\n');
+    const match = textBefore.match(/(?:^|\s)@([^\s]*)$/);
+    if (match) {
+      const token = match[0].trimStart();
+      editor.chain().focus().deleteRange({ from: from - token.length, to: from }).run();
+    }
+    editor
+      .chain()
+      .focus()
+      .insertContent(`@[${page.title}](${page.id}) `)
+      .run();
+    setPopup(null);
   }
 
   function moveBlock(dir: -1 | 1) {
@@ -255,7 +294,8 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
     editor.view.focus();
   }
 
-  const filtered = slash ? filterSlash(slash.filter) : [];
+  const slashItems = popup?.kind === 'slash' ? filterSlash(popup.filter) : [];
+  const mentionItems = popup?.kind === 'mention' ? filterMentions(popup.filter) : [];
 
   return (
     <div className="relative">
@@ -293,7 +333,7 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
           Görsel ekle
         </button>
         <span className="text-[11px] text-slate-400">
-          Dropcursor · görsel yapıştır · / menü (↑↓ Enter)
+          / komut · @ sayfa · görsel yapıştır · ↑↓ blok
         </span>
         <input
           ref={fileRef}
@@ -326,17 +366,17 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
           + Boş satıra tıkla ve yazmaya devam et
         </button>
       </div>
-      {slash && filtered.length > 0 && (
+      {popup?.kind === 'slash' && slashItems.length > 0 && (
         <div
           className="fixed z-50 w-64 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
-          style={{ top: slash.top, left: slash.left }}
+          style={{ top: popup.top, left: popup.left }}
         >
-          {filtered.map((item, i) => (
+          {slashItems.map((item, i) => (
             <button
               key={item.key}
               type="button"
               className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm ${
-                i === slash.index ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
+                i === popup.index ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
               }`}
               onMouseDown={(e) => {
                 e.preventDefault();
@@ -347,6 +387,35 @@ export function BlockEditor({ blocks, onChange, onSaveState }: Props) {
               <span className="text-[10px] text-slate-400">{item.hint}</span>
             </button>
           ))}
+        </div>
+      )}
+      {popup?.kind === 'mention' && (
+        <div
+          className="fixed z-50 w-72 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          style={{ top: popup.top, left: popup.left }}
+        >
+          <p className="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">
+            Sayfaya bağla
+          </p>
+          {mentionItems.length === 0 ? (
+            <p className="px-3 py-2 text-sm text-slate-500">Eşleşen sayfa yok</p>
+          ) : (
+            mentionItems.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                className={`block w-full truncate px-3 py-1.5 text-left text-sm ${
+                  i === popup.index ? 'bg-accent/10 text-accent' : 'hover:bg-panel'
+                }`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  applyMention(p);
+                }}
+              >
+                {p.icon || '📄'} {p.title}
+              </button>
+            ))
+          )}
         </div>
       )}
     </div>

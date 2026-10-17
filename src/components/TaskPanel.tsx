@@ -1,17 +1,29 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api, getErrorMessage, type Task } from '@/lib/api';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+
+const STATUS_LABEL: Record<Task['status'], string> = {
+  TODO: 'Yapılacak',
+  DOING: 'Devam',
+  DONE: 'Bitti',
+};
 
 export function TaskPanel({
   workspaceId,
   pageId,
+  seedTodos,
 }: {
   workspaceId: string;
   pageId?: string;
+  /** Editördeki checkbox metinlerini panelle senkronlamak için */
+  seedTodos?: { text: string; checked: boolean }[];
 }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState('');
+  const [dueAt, setDueAt] = useState('');
+  const [filter, setFilter] = useState<'ALL' | Task['status']>('ALL');
+
   const { data: tasks = [] } = useQuery({
     queryKey: ['tasks', workspaceId, pageId],
     queryFn: async () =>
@@ -22,18 +34,38 @@ export function TaskPanel({
       ).data,
   });
 
+  const visible = useMemo(
+    () => (filter === 'ALL' ? tasks : tasks.filter((t) => t.status === filter)),
+    [tasks, filter],
+  );
+
+  const counts = useMemo(() => {
+    const c = { TODO: 0, DOING: 0, DONE: 0 };
+    for (const t of tasks) c[t.status]++;
+    return c;
+  }, [tasks]);
+
   const create = useMutation({
-    mutationFn: () => api.post('/tasks', { workspaceId, pageId, title }),
+    mutationFn: (payload: { title: string; dueAt?: string; status?: Task['status'] }) =>
+      api.post('/tasks', { workspaceId, pageId, ...payload }),
     onSuccess: () => {
       setTitle('');
+      setDueAt('');
       void qc.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const update = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: Task['status'] }) =>
-      api.patch(`/tasks/${id}`, { status }),
+    mutationFn: ({
+      id,
+      ...patch
+    }: {
+      id: string;
+      status?: Task['status'];
+      title?: string;
+      dueAt?: string | null;
+    }) => api.patch(`/tasks/${id}`, patch),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['tasks'] }),
   });
 
@@ -42,30 +74,88 @@ export function TaskPanel({
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['tasks'] }),
   });
 
+  async function importFromEditor() {
+    if (!seedTodos?.length) {
+      toast.message('Editörde checkbox bulunamadı');
+      return;
+    }
+    const existing = new Set(tasks.map((t) => t.title.trim().toLowerCase()));
+    let n = 0;
+    for (const t of seedTodos) {
+      const text = t.text.trim();
+      if (!text || existing.has(text.toLowerCase())) continue;
+      await api.post('/tasks', {
+        workspaceId,
+        pageId,
+        title: text,
+        status: t.checked ? 'DONE' : 'TODO',
+      });
+      n++;
+    }
+    void qc.invalidateQueries({ queryKey: ['tasks'] });
+    toast.success(n ? `${n} görev paneline alındı` : 'Yeni görev yok (zaten var)');
+  }
+
   return (
-    <aside className="w-72 shrink-0 border-l border-slate-200 bg-white/70 p-3">
+    <aside className="flex w-72 shrink-0 flex-col border-l border-slate-200 bg-white/70 p-3">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
         Bu sayfadaki işler
       </h2>
+      <p className="mt-0.5 text-[11px] text-slate-400">
+        {counts.TODO} bekleyen · {counts.DOING} devam · {counts.DONE} bitti
+      </p>
+
+      <div className="mt-2 flex flex-wrap gap-1">
+        {(['ALL', 'TODO', 'DOING', 'DONE'] as const).map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`rounded px-1.5 py-0.5 text-[10px] ${
+              filter === s ? 'bg-accent text-white' : 'bg-panel text-slate-600'
+            }`}
+            onClick={() => setFilter(s)}
+          >
+            {s === 'ALL' ? 'Tümü' : STATUS_LABEL[s]}
+          </button>
+        ))}
+      </div>
+
       <form
-        className="mt-2 flex gap-1"
+        className="mt-2 space-y-1"
         onSubmit={(e) => {
           e.preventDefault();
-          if (title.trim()) create.mutate();
+          if (title.trim()) create.mutate({ title: title.trim(), dueAt: dueAt || undefined });
         }}
       >
         <input
-          className="min-w-0 flex-1 rounded border px-2 py-1 text-sm"
+          className="w-full rounded border px-2 py-1 text-sm"
           placeholder="Yeni görev…"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <button type="submit" className="rounded bg-accent px-2 text-sm text-white">
-          +
-        </button>
+        <div className="flex gap-1">
+          <input
+            type="date"
+            className="min-w-0 flex-1 rounded border px-2 py-1 text-xs"
+            value={dueAt}
+            onChange={(e) => setDueAt(e.target.value)}
+          />
+          <button type="submit" className="rounded bg-accent px-2 text-sm text-white">
+            +
+          </button>
+        </div>
       </form>
-      <ul className="mt-3 space-y-2">
-        {tasks.map((t) => (
+
+      <button
+        type="button"
+        className="mt-2 w-full rounded border border-dashed px-2 py-1 text-[11px] text-slate-600 hover:border-accent hover:text-accent"
+        onClick={() => void importFromEditor()}
+      >
+        Editör checkbox → panele aktar
+      </button>
+
+      <ul className="mt-3 flex-1 space-y-2 overflow-y-auto">
+        {visible.map((t) => (
           <li key={t.id} className="rounded-lg bg-panel px-2 py-1.5 text-sm">
             <div className="flex items-start justify-between gap-1">
               <span className={t.status === 'DONE' ? 'line-through text-slate-400' : ''}>
@@ -90,10 +180,21 @@ export function TaskPanel({
               <option value="DOING">Devam</option>
               <option value="DONE">Bitti</option>
             </select>
+            <input
+              type="date"
+              className="mt-1 w-full rounded border bg-white px-1 text-xs"
+              value={t.dueAt ? t.dueAt.slice(0, 10) : ''}
+              onChange={(e) =>
+                update.mutate({
+                  id: t.id,
+                  dueAt: e.target.value ? e.target.value : null,
+                })
+              }
+            />
           </li>
         ))}
-        {!tasks.length && (
-          <li className="text-xs text-slate-500">Henüz görev yok.</li>
+        {!visible.length && (
+          <li className="text-xs text-slate-500">Bu filtrede görev yok.</li>
         )}
       </ul>
     </aside>

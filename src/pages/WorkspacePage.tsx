@@ -106,6 +106,32 @@ export function WorkspacePage() {
     },
   });
 
+  const movePage = useMutation({
+    mutationFn: (parentId: string | null) =>
+      api.patch(`/pages/${pageId}`, { parentId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pages'] });
+      void qc.invalidateQueries({ queryKey: ['page', pageId] });
+      toast.success('Sayfa taşındı');
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
+  });
+
+  const editorTodos = useMemo(() => {
+    if (!page) return [];
+    return page.blocks
+      .filter((b) => b.type === 'todo')
+      .map((b) => ({
+        text: String(b.props.text || ''),
+        checked: Boolean(b.props.checked),
+      }));
+  }, [page]);
+
+  const childPages = useMemo(
+    () => pages.filter((p) => p.parentId === pageId),
+    [pages, pageId],
+  );
+
   const trashPage = useMutation({
     mutationFn: () => api.delete(`/pages/${pageId}`),
     onSuccess: async () => {
@@ -285,6 +311,25 @@ export function WorkspacePage() {
                   value={page.title}
                   onChange={(e) => rename.mutate(e.target.value)}
                 />
+                <label className="flex items-center gap-1 text-xs text-slate-500">
+                  Üst sayfa
+                  <select
+                    className="max-w-[180px] rounded border px-1 py-1 text-xs text-ink"
+                    value={page.parentId ?? ''}
+                    onChange={(e) =>
+                      movePage.mutate(e.target.value ? e.target.value : null)
+                    }
+                  >
+                    <option value="">(kök)</option>
+                    {pages
+                      .filter((p) => p.id !== page.id)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                  </select>
+                </label>
                 <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => share.mutate()}>
                   Paylaş
                 </button>
@@ -296,16 +341,49 @@ export function WorkspacePage() {
                 </button>
               </div>
 
-              {page.backlinks?.length > 0 && (
-                <div className="mb-4 rounded-lg bg-panel px-3 py-2 text-sm">
-                  <span className="font-medium">Backlink: </span>
-                  {page.backlinks.map((b) => (
-                    <Link key={b.fromPage.id} to={`/p/${b.fromPage.id}`} className="mr-2 text-accent underline">
-                      {b.fromPage.title}
-                    </Link>
-                  ))}
+              <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg bg-panel px-3 py-2 text-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Backlink · buraya bağlananlar
+                  </p>
+                  {page.backlinks?.length ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {page.backlinks.map((b) => (
+                        <li key={b.fromPage.id}>
+                          <Link to={`/p/${b.fromPage.id}`} className="text-accent underline">
+                            {b.fromPage.title}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Henüz yok. Başka sayfada <code className="text-[10px]">@</code> ile bu sayfayı
+                      mention et.
+                    </p>
+                  )}
                 </div>
-              )}
+                <div className="rounded-lg bg-panel px-3 py-2 text-sm">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Alt sayfalar
+                  </p>
+                  {childPages.length ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {childPages.map((c) => (
+                        <li key={c.id}>
+                          <Link to={`/p/${c.id}`} className="text-accent underline">
+                            {c.title}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-xs text-slate-500">
+                      Yok — sidebar’dan “Alt sayfa” veya satırdaki + ile ekle.
+                    </p>
+                  )}
+                </div>
+              </div>
 
               {isDbPage ? (
                 <DatabaseView pageId={page.id} />
@@ -313,6 +391,8 @@ export function WorkspacePage() {
                 <>
                   <BlockEditor
                     blocks={page.blocks.filter((b) => b.type !== 'drawing')}
+                    pages={pages}
+                    currentPageId={page.id}
                     onChange={(payload) => saveBlocks.mutate(payload)}
                     onSaveState={setSaveState}
                   />
@@ -345,7 +425,11 @@ export function WorkspacePage() {
           )}
         </div>
         {workspaceId && pageId && !isDbPage && (
-          <TaskPanel workspaceId={workspaceId} pageId={pageId} />
+          <TaskPanel
+            workspaceId={workspaceId}
+            pageId={pageId}
+            seedTodos={editorTodos}
+          />
         )}
       </main>
     </div>
