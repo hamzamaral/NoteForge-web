@@ -9,6 +9,8 @@ import { TaskPanel } from '@/components/TaskPanel';
 import { DrawingBlock } from '@/components/DrawingBlock';
 import { DatabaseView } from '@/components/DatabaseView';
 import { TemplateGallery } from '@/components/TemplateGallery';
+import { SharePanel } from '@/components/SharePanel';
+import { MembersPanel } from '@/components/MembersPanel';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
 import { getRecents, pushRecent } from '@/lib/recents';
@@ -22,6 +24,8 @@ export function WorkspacePage() {
   const [showTrash, setShowTrash] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [recents, setRecents] = useState(() => getRecents());
   const mdInputRef = useRef<HTMLInputElement>(null);
 
@@ -173,15 +177,6 @@ export function WorkspacePage() {
     },
   });
 
-  const share = useMutation({
-    mutationFn: () => api.post('/shares', { pageId }),
-    onSuccess: (res) => {
-      const url = `${window.location.origin}/share/${res.data.token}`;
-      void navigator.clipboard.writeText(url);
-      toast.success('Paylaşım linki kopyalandı');
-    },
-  });
-
   const exportMd = useMutation({
     mutationFn: async () => (await api.get(`/pages/${pageId}/export.md`)).data,
     onSuccess: (data: { title: string; markdown: string }) => {
@@ -267,6 +262,13 @@ export function WorkspacePage() {
             onClick={() => createDb.mutate()}
           >
             Veritabanı oluştur
+          </button>
+          <button
+            type="button"
+            className="w-full rounded border px-2 py-1 text-left text-xs"
+            onClick={() => setMembersOpen(true)}
+          >
+            Üyeler / davet
           </button>
         </div>
         {recents.length > 0 && (
@@ -413,7 +415,11 @@ export function WorkspacePage() {
                 >
                   {page.isFavorite ? '★ Favori' : '☆ Favori'}
                 </button>
-                <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => share.mutate()}>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-1 text-xs"
+                  onClick={() => setShareOpen(true)}
+                >
                   Paylaş
                 </button>
                 <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => exportMd.mutate()}>
@@ -512,7 +518,11 @@ export function WorkspacePage() {
                       }}
                     />
                   ))}
-                  <Comments pageId={page.id} />
+                  <Comments
+                    pageId={page.id}
+                    currentUserId={user?.id}
+                    blocks={page.blocks}
+                  />
                 </>
               )}
             </>
@@ -525,6 +535,16 @@ export function WorkspacePage() {
           onClose={() => setGalleryOpen(false)}
           onPick={(key) => createPage.mutate({ templateKey: key })}
         />
+        {pageId && (
+          <SharePanel pageId={pageId} open={shareOpen} onClose={() => setShareOpen(false)} />
+        )}
+        {workspaceId && (
+          <MembersPanel
+            workspaceId={workspaceId}
+            open={membersOpen}
+            onClose={() => setMembersOpen(false)}
+          />
+        )}
         {workspaceId && pageId && !isDbPage && (
           <TaskPanel
             workspaceId={workspaceId}
@@ -560,45 +580,112 @@ function Breadcrumb({ pages, pageId }: { pages: PageNode[]; pageId: string }) {
   );
 }
 
-function Comments({ pageId }: { pageId: string }) {
+function Comments({
+  pageId,
+  currentUserId,
+  blocks,
+}: {
+  pageId: string;
+  currentUserId?: string;
+  blocks: { id: string; type: string; props: Record<string, unknown> }[];
+}) {
   const qc = useQueryClient();
   const [body, setBody] = useState('');
+  const [blockId, setBlockId] = useState('');
   const { data: comments = [] } = useQuery({
     queryKey: ['comments', pageId],
     queryFn: async () =>
-      (await api.get<{ id: string; body: string; author: { fullName: string } }[]>(`/pages/${pageId}/comments`))
-        .data,
+      (
+        await api.get<
+          {
+            id: string;
+            body: string;
+            blockId?: string | null;
+            createdAt: string;
+            author: { id: string; fullName: string };
+          }[]
+        >(`/pages/${pageId}/comments`)
+      ).data,
   });
+
   return (
     <section className="mt-10 border-t pt-4">
-      <h3 className="text-sm font-semibold uppercase text-slate-500">Yorumlar</h3>
+      <h3 className="text-sm font-semibold uppercase text-slate-500">
+        Yorumlar · {comments.length}
+      </h3>
       <ul className="mt-2 space-y-2">
         {comments.map((c) => (
-          <li key={c.id} className="rounded-lg bg-white/80 px-3 py-2 text-sm">
-            <span className="font-medium">{c.author.fullName}: </span>
-            {c.body}
+          <li key={c.id} className="rounded-lg border bg-white/80 px-3 py-2 text-sm">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <span className="font-medium">{c.author.fullName}</span>
+                <span className="ml-2 text-[10px] text-slate-400">
+                  {new Date(c.createdAt).toLocaleString('tr-TR')}
+                </span>
+                {c.blockId && (
+                  <span className="ml-2 text-[10px] text-accent">
+                    blok:{' '}
+                    {blocks.find((b) => b.id === c.blockId)?.type || c.blockId.slice(0, 6)}
+                  </span>
+                )}
+                <p className="mt-0.5">{c.body}</p>
+              </div>
+              {c.author.id === currentUserId && (
+                <button
+                  type="button"
+                  className="text-xs text-red-600"
+                  onClick={async () => {
+                    await api.delete(`/pages/${pageId}/comments/${c.id}`);
+                    void qc.invalidateQueries({ queryKey: ['comments', pageId] });
+                  }}
+                >
+                  Sil
+                </button>
+              )}
+            </div>
           </li>
         ))}
+        {!comments.length && (
+          <li className="text-xs text-slate-500">Henüz yorum yok.</li>
+        )}
       </ul>
       <form
-        className="mt-2 flex gap-2"
+        className="mt-3 space-y-2"
         onSubmit={async (e) => {
           e.preventDefault();
           if (!body.trim()) return;
-          await api.post(`/pages/${pageId}/comments`, { body });
+          await api.post(`/pages/${pageId}/comments`, {
+            body,
+            blockId: blockId || undefined,
+          });
           setBody('');
+          setBlockId('');
           void qc.invalidateQueries({ queryKey: ['comments', pageId] });
         }}
       >
-        <input
-          className="flex-1 rounded border px-2 py-1 text-sm"
-          placeholder="Yorum yaz…"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-        />
-        <button type="submit" className="rounded bg-accent px-3 text-sm text-white">
-          Gönder
-        </button>
+        <select
+          className="w-full rounded border px-2 py-1 text-xs"
+          value={blockId}
+          onChange={(e) => setBlockId(e.target.value)}
+        >
+          <option value="">Sayfa yorumu (blok yok)</option>
+          {blocks.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.type}: {String(b.props.text || b.props.sceneId || b.id).slice(0, 40)}
+            </option>
+          ))}
+        </select>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded border px-2 py-1 text-sm"
+            placeholder="Yorum yaz…"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          <button type="submit" className="rounded bg-accent px-3 text-sm text-white">
+            Gönder
+          </button>
+        </div>
       </form>
     </section>
   );

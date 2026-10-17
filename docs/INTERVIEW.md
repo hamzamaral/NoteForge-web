@@ -23,6 +23,9 @@ Drawing blocks embed Excalidraw JSON in block `props.scene`. Templates (`blank`,
 ### How are databases modeled?
 A Database is linked 1:1 to a Page. Properties (`text|number|select|date`) and Views (`table|board` + JSON config) are first-class. Rows store a JSON `values` map keyed by property name. Board drag updates the group-by select field; table filter/sort can be persisted on the view.
 
+### How does sharing and membership work?
+Page shares are token URLs (`/share/:token`) with READ/COMMENT permission — no JWT. Workspace members use OWNER/EDITOR/VIEWER; invite by existing user email; only OWNER removes members. Comments can optionally attach to a `blockId`.
+
 ### How do you handle concurrent edits?
 Phase 1–5: **optimistic version** on `Page.contentVersion`. Conflicting PATCH returns 409. Phase 6: Yjs CRDT relay over Socket.IO for true multiplayer.
 
