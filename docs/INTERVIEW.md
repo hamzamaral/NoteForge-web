@@ -17,6 +17,9 @@ Top-level nodes swap via ↑/↓ (transaction rewrite). Native HTML5 drop uses T
 ### How do page links / backlinks work?
 Typing `@` opens a page picker; insert `@[Title](uuid)`. On save we parse mentions into `PageLink` rows. Target page shows a backlink panel. Moving a page updates `parentId` with cycle detection (cannot nest under own descendant).
 
+### How do drawings and templates differ from Notion?
+Drawing blocks embed Excalidraw JSON in block `props.scene`. Templates (`blank`, `meeting`, `project`, `brainstorm`, `weekly`) are server-side recipes. Markdown import parses headings/lists/todos into blocks via `POST /pages/import.md`.
+
 ### How do you handle concurrent edits?
 Phase 1–5: **optimistic version** on `Page.contentVersion`. Conflicting PATCH returns 409. Phase 6: Yjs CRDT relay over Socket.IO for true multiplayer.
 

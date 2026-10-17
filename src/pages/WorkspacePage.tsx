@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api, getErrorMessage, type PageDetail, type PageNode, type Workspace } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -8,8 +8,10 @@ import { BlockEditor } from '@/components/BlockEditor';
 import { TaskPanel } from '@/components/TaskPanel';
 import { DrawingBlock } from '@/components/DrawingBlock';
 import { DatabaseView } from '@/components/DatabaseView';
+import { TemplateGallery } from '@/components/TemplateGallery';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
+import { getRecents, pushRecent } from '@/lib/recents';
 
 export function WorkspacePage() {
   const { user, logout } = useAuth();
@@ -19,6 +21,9 @@ export function WorkspacePage() {
   const [q, setQ] = useState('');
   const [showTrash, setShowTrash] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [recents, setRecents] = useState(() => getRecents());
+  const mdInputRef = useRef<HTMLInputElement>(null);
 
   const { data: workspaces = [] } = useQuery({
     queryKey: ['workspaces'],
@@ -63,6 +68,13 @@ export function WorkspacePage() {
     if (!pageId && pages[0]) navigate(`/p/${pages[0].id}`, { replace: true });
   }, [pageId, pages, navigate]);
 
+  useEffect(() => {
+    if (page) {
+      pushRecent({ id: page.id, title: page.title });
+      setRecents(getRecents());
+    }
+  }, [page?.id, page?.title]);
+
   const tree = useMemo(() => buildTree(pages), [pages]);
 
   const createPage = useMutation({
@@ -104,6 +116,26 @@ export function WorkspacePage() {
       void qc.invalidateQueries({ queryKey: ['pages'] });
       void qc.invalidateQueries({ queryKey: ['page', pageId] });
     },
+  });
+
+  const toggleFavorite = useMutation({
+    mutationFn: () =>
+      api.patch(`/pages/${pageId}`, { isFavorite: !page?.isFavorite }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pages'] });
+      void qc.invalidateQueries({ queryKey: ['page', pageId] });
+    },
+  });
+
+  const importMd = useMutation({
+    mutationFn: (markdown: string) =>
+      api.post('/pages/import.md', { workspaceId, markdown }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ['pages'] });
+      navigate(`/p/${res.data.id}`);
+      toast.success('Markdown içe aktarıldı');
+    },
+    onError: (e) => toast.error(getErrorMessage(e)),
   });
 
   const movePage = useMutation({
@@ -205,17 +237,30 @@ export function WorkspacePage() {
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            onClick={() => createPage.mutate({ templateKey: 'meeting' })}
+            onClick={() => setGalleryOpen(true)}
           >
-            Şablon: Toplantı
+            Şablon galerisi…
           </button>
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
-            onClick={() => createPage.mutate({ templateKey: 'project' })}
+            onClick={() => mdInputRef.current?.click()}
           >
-            Şablon: Proje
+            MD içe aktar
           </button>
+          <input
+            ref={mdInputRef}
+            type="file"
+            accept=".md,text/markdown,text/plain"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const text = await file.text();
+              importMd.mutate(text);
+              e.target.value = '';
+            }}
+          />
           <button
             type="button"
             className="w-full rounded border px-2 py-1 text-left text-xs"
@@ -224,7 +269,37 @@ export function WorkspacePage() {
             Veritabanı oluştur
           </button>
         </div>
+        {recents.length > 0 && (
+          <div className="border-b px-2 pb-2">
+            <p className="px-1 text-[10px] font-semibold uppercase text-slate-400">Son bakılanlar</p>
+            {recents.slice(0, 5).map((r) => (
+              <Link
+                key={r.id}
+                to={`/p/${r.id}`}
+                className="block truncate rounded px-2 py-0.5 text-xs text-slate-600 hover:bg-panel"
+              >
+                {r.title}
+              </Link>
+            ))}
+          </div>
+        )}
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
+          {pages.some((p) => p.isFavorite) && (
+            <div className="mb-2">
+              <p className="px-1 text-[10px] font-semibold uppercase text-slate-400">Favoriler</p>
+              {pages
+                .filter((p) => p.isFavorite)
+                .map((p) => (
+                  <Link
+                    key={p.id}
+                    to={`/p/${p.id}`}
+                    className="block truncate rounded px-2 py-1 text-sm hover:bg-panel"
+                  >
+                    ★ {p.title}
+                  </Link>
+                ))}
+            </div>
+          )}
           {(q.trim().length > 1
             ? searchHits.map((p) => ({ ...p, depth: 0 }))
             : flattenTree(tree)
@@ -330,6 +405,14 @@ export function WorkspacePage() {
                       ))}
                   </select>
                 </label>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-1 text-xs"
+                  title="Favori"
+                  onClick={() => toggleFavorite.mutate()}
+                >
+                  {page.isFavorite ? '★ Favori' : '☆ Favori'}
+                </button>
                 <button type="button" className="rounded border px-2 py-1 text-xs" onClick={() => share.mutate()}>
                   Paylaş
                 </button>
@@ -399,11 +482,24 @@ export function WorkspacePage() {
                   {drawingBlocks.map((b) => (
                     <DrawingBlock
                       key={b.id}
+                      title={`Çizim · ${String(b.props.sceneId || b.id).slice(0, 8)}`}
                       initialData={b.props.scene}
                       onSave={(scene) => {
                         const next = page.blocks.map((x) =>
                           x.id === b.id ? { ...x, props: { ...x.props, scene } } : x,
                         );
+                        saveBlocks.mutate({
+                          blocks: next.map((x, i) => ({
+                            id: x.id,
+                            type: x.type,
+                            props: x.props,
+                            sortOrder: i + 1,
+                          })),
+                          links: [],
+                        });
+                      }}
+                      onRemove={() => {
+                        const next = page.blocks.filter((x) => x.id !== b.id);
                         saveBlocks.mutate({
                           blocks: next.map((x, i) => ({
                             id: x.id,
@@ -424,6 +520,11 @@ export function WorkspacePage() {
             <p className="text-slate-500">Sayfa seçin veya oluşturun.</p>
           )}
         </div>
+        <TemplateGallery
+          open={galleryOpen}
+          onClose={() => setGalleryOpen(false)}
+          onPick={(key) => createPage.mutate({ templateKey: key })}
+        />
         {workspaceId && pageId && !isDbPage && (
           <TaskPanel
             workspaceId={workspaceId}

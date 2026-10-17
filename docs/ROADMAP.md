@@ -5,7 +5,7 @@
 | 0 | İskelet, docs, Cursor rules, seed | ship |
 | 1 | TipTap, slash, autosave, tree, trash | ship + deepen (image, ↑↓, breadcrumb, presence UI) |
 | 2 | Nested pages, tasks, backlinks | ship + deepen (@ mention, move, due, import) |
-| 3 | Excalidraw, templates, MD export | ship |
+| 3 | Excalidraw, templates, MD export | ship + deepen (gallery, MD import, favorites, recent) |
 | 4 | Database table/board | ship |
 | 5 | Share links, comments, invites | ship |
 | 6 | Socket presence + Yjs relay | ship (lite) |
