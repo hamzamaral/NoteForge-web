@@ -28,6 +28,16 @@
   min-width: 0;
 }
 
+/* Touch-friendly targets on narrow viewports */
+@media (max-width: 767px) {
+  aside button,
+  aside a {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+}
+
 html,
 body,
 #root {

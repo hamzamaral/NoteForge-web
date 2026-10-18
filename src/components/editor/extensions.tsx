@@ -1,7 +1,9 @@
 import { Node, mergeAttributes } from '@tiptap/core';
 import { ReactNodeViewRenderer, NodeViewWrapper, type NodeViewProps } from '@tiptap/react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import katex from 'katex';
 import { DrawingBlock } from '@/components/DrawingBlock';
+import 'katex/dist/katex.min.css';
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
@@ -236,23 +238,37 @@ export const ColumnsNode = Node.create({
 
 function MathView({ node, updateAttributes, selected }: NodeViewProps) {
   const tex = String(node.attrs.tex || '');
+  const html = useMemo(() => {
+    if (!tex.trim()) return '';
+    try {
+      return katex.renderToString(tex, { throwOnError: false, displayMode: true });
+    } catch {
+      return '';
+    }
+  }, [tex]);
   return (
     <NodeViewWrapper
-      className={`my-2 rounded-lg border bg-slate-50 px-3 py-2 font-mono text-sm ${
+      className={`my-2 rounded-lg border bg-slate-50 px-3 py-2 ${
         selected ? 'border-accent' : 'border-slate-200'
       }`}
       data-math=""
     >
-      <label className="block text-[10px] uppercase text-slate-400">KaTeX / math</label>
+      <label className="block text-[10px] uppercase text-slate-400">KaTeX</label>
       <input
-        className="mt-1 w-full bg-transparent outline-none"
+        className="mt-1 w-full bg-transparent font-mono text-sm outline-none"
         value={tex}
         onChange={(e) => updateAttributes({ tex: e.target.value })}
         placeholder="E = mc^2"
+        aria-label="LaTeX formül"
       />
-      <p className="mt-1 text-center text-base" aria-hidden>
-        {tex ? `$$ ${tex} $$` : '∅'}
-      </p>
+      {html ? (
+        <div
+          className="mt-2 overflow-x-auto text-center"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <p className="mt-1 text-center text-xs text-slate-400">Formül yazın</p>
+      )}
     </NodeViewWrapper>
   );
 }

@@ -19,6 +19,8 @@ import { SharePanel } from '@/components/SharePanel';
 import { MembersPanel } from '@/components/MembersPanel';
 import { SearchPalette } from '@/components/SearchPalette';
 import { NotificationBell } from '@/components/NotificationBell';
+import { AuditPanel } from '@/components/AuditPanel';
+import { KeyboardHelp } from '@/components/KeyboardHelp';
 import { usePageSync } from '@/lib/sync';
 import { docToBlocks } from '@/lib/blocks';
 import { getRecents, pruneRecents, pushRecent, removeRecent } from '@/lib/recents';
@@ -37,6 +39,8 @@ export function WorkspacePage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [recents, setRecents] = useState(() => getRecents());
   const [navOpen, setNavOpen] = useState(false);
   const mdInputRef = useRef<HTMLInputElement>(null);
@@ -81,6 +85,18 @@ export function WorkspacePage() {
         e.preventDefault();
         setSearchOpen(true);
       }
+      if (
+        e.key === '?' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target as HTMLElement)?.isContentEditable
+      ) {
+        e.preventDefault();
+        setKeysOpen(true);
+      }
+      if (e.key === 'Escape') setKeysOpen(false);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -392,6 +408,38 @@ export function WorkspacePage() {
             onClick={() => setMembersOpen(true)}
           >
             Üyeler / davet
+          </button>
+          {workspaceId && (
+            <button
+              type="button"
+              className="w-full rounded border px-2 py-1 text-left text-xs"
+              onClick={async () => {
+                try {
+                  await api.post(`/workspaces/${workspaceId}/search/reindex`);
+                  toast.success('Arama indeksi yenilendi');
+                } catch (e) {
+                  toast.message(getErrorMessage(e) || 'Meili yok — ILIKE kullanılıyor');
+                }
+              }}
+            >
+              Arama reindex
+            </button>
+          )}
+          {myRole === 'OWNER' && (
+            <button
+              type="button"
+              className="w-full rounded border px-2 py-1 text-left text-xs"
+              onClick={() => setAuditOpen(true)}
+            >
+              Denetim kaydı
+            </button>
+          )}
+          <button
+            type="button"
+            className="w-full rounded border px-2 py-1 text-left text-xs text-slate-500"
+            onClick={() => setKeysOpen(true)}
+          >
+            Klavye (? / @ Ctrl+K)
           </button>
         </div>
         {recents.length > 0 && (
@@ -809,6 +857,14 @@ export function WorkspacePage() {
             }}
           />
         )}
+        {workspaceId && (
+          <AuditPanel
+            workspaceId={workspaceId}
+            open={auditOpen}
+            onClose={() => setAuditOpen(false)}
+          />
+        )}
+        <KeyboardHelp open={keysOpen} onClose={() => setKeysOpen(false)} />
       </main>
     </div>
   );

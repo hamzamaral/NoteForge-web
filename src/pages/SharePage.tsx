@@ -48,7 +48,7 @@ export function SharePage() {
 
   return (
     <div className="min-h-screen bg-paper">
-      <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
+      <div className="mx-auto max-w-3xl px-3 py-6 sm:px-6 sm:py-10">
         <p className="text-xs uppercase tracking-wide text-slate-500">
           NoteForge · paylaşılan sayfa ·{' '}
           {data.permission === 'READ' ? 'salt okunur' : 'yorum açık'}

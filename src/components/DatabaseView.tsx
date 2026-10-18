@@ -38,6 +38,8 @@ export function DatabaseView({ pageId }: { pageId: string }) {
     'table',
   );
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterText, setFilterText] = useState('');
+  const [filterMulti, setFilterMulti] = useState('');
   const [sortBy, setSortBy] = useState('Ad');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [newPropName, setNewPropName] = useState('');
@@ -67,7 +69,8 @@ export function DatabaseView({ pageId }: { pageId: string }) {
   const invalidate = () => void qc.invalidateQueries({ queryKey: ['db-by-page', pageId] });
 
   const addRow = useMutation({
-    mutationFn: () => api.post(`/databases/${db!.id}/rows`, { values: {} }),
+    mutationFn: (values: Record<string, unknown> = {}) =>
+      api.post(`/databases/${db!.id}/rows`, { values }),
     onSuccess: invalidate,
     onError: (e) => toast.error(getErrorMessage(e)),
   });
@@ -131,18 +134,45 @@ export function DatabaseView({ pageId }: { pageId: string }) {
           sortBy,
           sortDir,
           groupBy,
-          filter: filterStatus ? { Durum: filterStatus } : {},
+          filter: {
+            ...(filterStatus ? { Durum: filterStatus } : {}),
+            ...(filterText ? { q: filterText } : {}),
+            ...(filterMulti ? { multi: filterMulti } : {}),
+          },
         },
       });
     },
     onSuccess: () => toast.message('Görünüm kaydedildi'),
   });
 
+  const multiProp = useMemo(
+    () => db?.properties.find((p) => p.type === 'multi_select'),
+    [db],
+  );
+
   const rows = useMemo(() => {
     if (!db) return [];
     let list = [...db.rows];
     if (filterStatus) {
       list = list.filter((r) => String(r.values.Durum || '') === filterStatus);
+    }
+    if (filterText.trim()) {
+      const q = filterText.trim().toLowerCase();
+      list = list.filter((r) =>
+        Object.values(r.values).some((v) => String(v ?? '').toLowerCase().includes(q)),
+      );
+    }
+    if (filterMulti && multiProp) {
+      list = list.filter((r) => {
+        const raw = r.values[multiProp.name];
+        const arr = Array.isArray(raw)
+          ? raw.map(String)
+          : String(raw || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+        return arr.includes(filterMulti);
+      });
     }
     list.sort((a, b) => {
       const av = a.values[sortBy];
@@ -157,7 +187,7 @@ export function DatabaseView({ pageId }: { pageId: string }) {
       return sortDir === 'asc' ? cmp : -cmp;
     });
     return list;
-  }, [db, filterStatus, sortBy, sortDir]);
+  }, [db, filterStatus, filterText, filterMulti, multiProp, sortBy, sortDir]);
 
   const groups = useMemo(() => {
     if (!db) return {} as Record<string, Row[]>;
@@ -236,6 +266,79 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         />
       );
     }
+    if (p.type === 'checkbox') {
+      return (
+        <input
+          type="checkbox"
+          checked={Boolean(value)}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: e.target.checked },
+            })
+          }
+        />
+      );
+    }
+    if (p.type === 'url') {
+      return (
+        <input
+          type="url"
+          className="w-full rounded border px-1 text-xs"
+          placeholder="https://"
+          value={String(value ?? '')}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: e.target.value },
+            })
+          }
+        />
+      );
+    }
+    if (p.type === 'multi_select') {
+      const selected = Array.isArray(value)
+        ? (value as string[])
+        : String(value || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+      return (
+        <select
+          className="w-full rounded border px-1 text-xs"
+          multiple
+          value={selected}
+          onChange={(e) => {
+            const opts = [...e.target.selectedOptions].map((o) => o.value);
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: opts },
+            });
+          }}
+        >
+          {optsOf(p).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    }
+    if (p.type === 'person' || p.type === 'files') {
+      return (
+        <input
+          className="w-full rounded border px-1 text-xs"
+          placeholder={p.type === 'files' ? 'Dosya URL' : 'Kişi'}
+          value={String(value ?? '')}
+          onChange={(e) =>
+            updateRow.mutate({
+              id: row.id,
+              values: { ...row.values, [p.name]: e.target.value },
+            })
+          }
+        />
+      );
+    }
     return (
       <input
         className="w-full rounded border px-1"
@@ -297,6 +400,13 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         >
           Liste
         </button>
+        <input
+          className="min-w-[120px] rounded border px-2 py-1 text-xs"
+          placeholder="Metin filtre…"
+          value={filterText}
+          onChange={(e) => setFilterText(e.target.value)}
+          aria-label="Metin filtresi"
+        />
         <select
           className="rounded border px-1 text-xs"
           value={filterStatus}
@@ -309,6 +419,37 @@ export function DatabaseView({ pageId }: { pageId: string }) {
             </option>
           ))}
         </select>
+        {multiProp && (
+          <select
+            className="rounded border px-1 text-xs"
+            value={filterMulti}
+            onChange={(e) => setFilterMulti(e.target.value)}
+          >
+            <option value="">Multi: tümü</option>
+            {optsOf(multiProp).map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+        )}
+        <button
+          type="button"
+          className="rounded border px-2 py-1 text-xs"
+          title="Görev başlığından satır oluştur"
+          onClick={async () => {
+            try {
+              const title = window.prompt('Görev / satır adı', 'Yeni görev satırı');
+              if (!title?.trim()) return;
+              await addRow.mutateAsync({ Ad: title.trim(), Durum: 'Yeni' });
+              toast.success('Görevden satır eklendi');
+            } catch (e) {
+              toast.error(getErrorMessage(e));
+            }
+          }}
+        >
+          Görev → satır
+        </button>
         <select
           className="rounded border px-1 text-xs"
           value={sortBy}
@@ -337,7 +478,7 @@ export function DatabaseView({ pageId }: { pageId: string }) {
         <button
           type="button"
           className="ml-auto rounded border px-2 py-1 text-xs"
-          onClick={() => addRow.mutate()}
+          onClick={() => addRow.mutate({})}
         >
           Satır ekle
         </button>
