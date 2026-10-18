@@ -81,6 +81,7 @@ export type PageNode = {
   id: string;
   title: string;
   icon?: string | null;
+  coverUrl?: string | null;
   parentId?: string | null;
   updatedAt: string;
   isFavorite?: boolean;

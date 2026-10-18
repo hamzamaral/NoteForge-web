@@ -134,7 +134,47 @@ function BlockView({ block }: { block: Block }) {
       );
     case 'callout':
       return (
-        <div className="my-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">{text}</div>
+        <div className="my-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          {String(block.props.emoji || '💡')} {text}
+        </div>
+      );
+    case 'toggle':
+      return (
+        <details className="my-2 rounded-lg border px-3 py-2" open>
+          <summary className="cursor-pointer text-sm font-medium">Toggle</summary>
+          <p className="mt-1">{text}</p>
+        </details>
+      );
+    case 'columns': {
+      const cols = Array.isArray(block.props.columns)
+        ? (block.props.columns as string[])
+        : [text];
+      return (
+        <div className="my-2 flex gap-2">
+          {cols.map((c, i) => (
+            <div key={i} className="flex-1 rounded border border-dashed p-2 text-sm">
+              {c}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case 'math':
+      return (
+        <p className="my-2 rounded bg-slate-50 px-3 py-2 text-center font-mono text-sm">
+          $$ {String(block.props.tex || text)} $$
+        </p>
+      );
+    case 'bookmark':
+      return (
+        <a
+          className="my-2 block rounded-lg border px-3 py-2 text-sm text-accent"
+          href={String(block.props.url || '#')}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {String(block.props.title || block.props.url || 'Link')}
+        </a>
       );
     case 'divider':
       return <hr className="my-4 border-slate-200" />;
@@ -148,9 +188,14 @@ function BlockView({ block }: { block: Block }) {
       );
     case 'drawing':
       return (
-        <p className="text-sm italic text-slate-500">
-          [çizim — {String(block.props.sceneId || 'sahne')}]
-        </p>
+        <div className="my-2 rounded-lg border bg-panel/50 px-3 py-4 text-sm text-slate-500">
+          ✏️ Çizim — {String(block.props.sceneId || 'sahne').slice(0, 8)}
+          {Array.isArray(block.props.elements) && (
+            <span className="ml-2 text-[11px]">
+              {(block.props.elements as unknown[]).length} öğe
+            </span>
+          )}
+        </div>
       );
     default:
       return <p>{text}</p>;

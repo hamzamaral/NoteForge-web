@@ -17,7 +17,7 @@
 | 12 | Meilisearch + Ctrl+K kind filters (ILIKE fallback) | ship |
 | 13 | Rich DB props, calendar/gallery/list, row-as-page | ship |
 | 14 | Notifications inbox, assignee, due reminders | ship |
-| 15 | Callout/toggle, snapshots history UI | ship |
+| 15 | Callout/toggle/columns/math/bookmark, Drawing TipTap node, cover/icon | ship |
 | 16 | Jest/Vitest/Playwright + CI test gate | ship |
 | 17 | Responsive shell, focus trap, a11y, reduced-motion | ship |
 | 18 | Audit, ZIP export, SystemSetting, pino logs | ship |

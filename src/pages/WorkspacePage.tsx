@@ -13,7 +13,6 @@ import {
 import { useAuth } from '@/lib/auth';
 import { BlockEditor } from '@/components/BlockEditor';
 import { TaskPanel } from '@/components/TaskPanel';
-import { DrawingBlock } from '@/components/DrawingBlock';
 import { DatabaseView } from '@/components/DatabaseView';
 import { TemplateGallery } from '@/components/TemplateGallery';
 import { SharePanel } from '@/components/SharePanel';
@@ -259,8 +258,6 @@ export function WorkspacePage() {
       a.click();
     },
   });
-
-  const drawingBlocks = (page?.blocks || []).filter((b) => b.type === 'drawing');
 
   const { data: dbForPage } = useQuery({
     queryKey: ['db-by-page', pageId],
@@ -559,10 +556,35 @@ export function WorkspacePage() {
                   ))}
                 </div>
               </div>
+              {page.coverUrl && (
+                <div
+                  className="mb-3 h-36 w-full overflow-hidden rounded-xl bg-cover bg-center"
+                  style={{ backgroundImage: `url(${page.coverUrl})` }}
+                  role="img"
+                  aria-label="Kapak"
+                />
+              )}
               <div className="mb-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border bg-panel px-2 py-1 text-2xl leading-none"
+                  title="İkon seç"
+                  disabled={!canEdit}
+                  onClick={() => {
+                    const icons = ['📄', '📝', '🚀', '💡', '📚', '🎯', '🧠', '✨', '🗂️', '🔥'];
+                    const next = icons[(icons.indexOf(page.icon || '📄') + 1) % icons.length];
+                    api.patch(`/pages/${page.id}`, { icon: next }).then(() => {
+                      void qc.invalidateQueries({ queryKey: ['page', pageId] });
+                      void qc.invalidateQueries({ queryKey: ['pages'] });
+                    });
+                  }}
+                >
+                  {page.icon || '📄'}
+                </button>
                 <input
                   className="font-display min-w-0 flex-1 bg-transparent text-3xl font-bold outline-none"
                   value={page.title}
+                  disabled={!canEdit}
                   onChange={(e) => rename.mutate(e.target.value)}
                 />
                 <label className="flex items-center gap-1 text-xs text-slate-500">
@@ -592,6 +614,35 @@ export function WorkspacePage() {
                 >
                   {page.isFavorite ? '★ Favori' : '☆ Favori'}
                 </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-1 text-xs"
+                    onClick={() => {
+                      const input = document.createElement('input');
+                      input.type = 'file';
+                      input.accept = 'image/*';
+                      input.onchange = async () => {
+                        const file = input.files?.[0];
+                        if (!file || !workspaceId) return;
+                        try {
+                          const form = new FormData();
+                          form.append('file', file);
+                          form.append('workspaceId', workspaceId);
+                          const { data } = await api.post<{ url: string }>('/files/upload', form);
+                          await api.patch(`/pages/${page.id}`, { coverUrl: data.url });
+                          void qc.invalidateQueries({ queryKey: ['page', pageId] });
+                          toast.success('Kapak güncellendi');
+                        } catch (e) {
+                          toast.error(getErrorMessage(e));
+                        }
+                      };
+                      input.click();
+                    }}
+                  >
+                    Kapak
+                  </button>
+                )}
                 <button
                   type="button"
                   className="rounded border px-2 py-1 text-xs"
@@ -689,65 +740,20 @@ export function WorkspacePage() {
                 <>
                   <BlockEditor
                     key={page.id}
-                    blocks={page.blocks.filter((b) => b.type !== 'drawing')}
+                    blocks={page.blocks}
                     pages={pages}
                     currentPageId={page.id}
                     workspaceId={workspaceId}
                     provider={provider}
                     readOnly={!canEdit}
-                    onChange={(payload) => {
-                      // Editor doesn't own drawing blocks — merge them back so autosave
-                      // doesn't wipe Excalidraw scenes.
-                      const drawings = page.blocks.filter((b) => b.type === 'drawing');
-                      const base = payload.blocks.length;
-                      return saveBlocks.mutateAsync({
-                        blocks: [
-                          ...payload.blocks,
-                          ...drawings.map((d, i) => ({
-                            id: d.id,
-                            type: d.type,
-                            props: d.props,
-                            sortOrder: base + i + 1,
-                          })),
-                        ],
+                    onChange={(payload) =>
+                      saveBlocks.mutateAsync({
+                        blocks: payload.blocks,
                         links: payload.links,
-                      });
-                    }}
+                      })
+                    }
                     onSaveState={setSaveState}
                   />
-                  {drawingBlocks.map((b) => (
-                    <DrawingBlock
-                      key={b.id}
-                      title={`Çizim · ${String(b.props.sceneId || b.id).slice(0, 8)}`}
-                      initialData={b.props.scene}
-                      onSave={(scene) => {
-                        const next = page.blocks.map((x) =>
-                          x.id === b.id ? { ...x, props: { ...x.props, scene } } : x,
-                        );
-                        saveBlocks.mutate({
-                          blocks: next.map((x, i) => ({
-                            id: x.id,
-                            type: x.type,
-                            props: x.props,
-                            sortOrder: i + 1,
-                          })),
-                          links: [],
-                        });
-                      }}
-                      onRemove={() => {
-                        const next = page.blocks.filter((x) => x.id !== b.id);
-                        saveBlocks.mutate({
-                          blocks: next.map((x, i) => ({
-                            id: x.id,
-                            type: x.type,
-                            props: x.props,
-                            sortOrder: i + 1,
-                          })),
-                          links: [],
-                        });
-                      }}
-                    />
-                  ))}
                   <Comments
                     pageId={page.id}
                     currentUserId={user?.id}

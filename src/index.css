@@ -13,6 +13,21 @@
   }
 }
 
+.ProseMirror .nf-callout::before {
+  content: attr(data-callout);
+  margin-right: 0.5rem;
+}
+
+.ProseMirror .nf-columns {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ProseMirror .nf-column {
+  flex: 1;
+  min-width: 0;
+}
+
 html,
 body,
 #root {

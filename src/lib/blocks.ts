@@ -59,13 +59,60 @@ export function blocksToDoc(blocks: Block[]): JSONContent {
         };
       case 'drawing':
         return {
-          type: 'paragraph',
-          content: [
-            {
-              type: 'text',
-              text: `[çizim:${String(b.props.sceneId || b.id)}]`,
-            },
-          ],
+          type: 'drawing',
+          attrs: {
+            sceneId: String(b.props.sceneId || b.id),
+            sceneJson: b.props.elements || b.props.scene
+              ? JSON.stringify({
+                  elements: b.props.elements || [],
+                  appState: b.props.appState,
+                  files: b.props.files,
+                  ...(typeof b.props.scene === 'object' && b.props.scene ? (b.props.scene as object) : {}),
+                })
+              : b.props.sceneJson
+                ? String(b.props.sceneJson)
+                : null,
+          },
+        };
+      case 'callout':
+        return {
+          type: 'callout',
+          attrs: { emoji: String(b.props.emoji || '💡') },
+          content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : undefined }],
+        };
+      case 'toggle':
+        return {
+          type: 'toggleBlock',
+          attrs: { open: b.props.open !== false },
+          content: [{ type: 'paragraph', content: text ? [{ type: 'text', text }] : undefined }],
+        };
+      case 'columns': {
+        const cols = Array.isArray(b.props.columns) ? (b.props.columns as string[]) : [text, ''];
+        return {
+          type: 'columns',
+          content: cols.map((c) => ({
+            type: 'column',
+            content: [
+              {
+                type: 'paragraph',
+                content: c ? [{ type: 'text', text: String(c) }] : undefined,
+              },
+            ],
+          })),
+        };
+      }
+      case 'math':
+        return {
+          type: 'mathBlock',
+          attrs: { tex: String(b.props.tex || text) },
+        };
+      case 'bookmark':
+        return {
+          type: 'bookmark',
+          attrs: {
+            url: String(b.props.url || ''),
+            title: String(b.props.title || b.props.url || ''),
+          },
         };
       default:
         return {
@@ -74,7 +121,6 @@ export function blocksToDoc(blocks: Block[]): JSONContent {
         };
     }
   });
-  // Always keep a trailing empty paragraph for click-to-write
   content.push({ type: 'paragraph' });
   return { type: 'doc', content };
 }
@@ -157,10 +203,63 @@ export function docToBlocks(doc: JSONContent): {
         },
         sortOrder: order++,
       });
+    } else if (node.type === 'drawing') {
+      let scene: Record<string, unknown> = {};
+      try {
+        scene = node.attrs?.sceneJson ? JSON.parse(String(node.attrs.sceneJson)) : {};
+      } catch {
+        scene = {};
+      }
+      blocks.push({
+        type: 'drawing',
+        props: {
+          sceneId: String(node.attrs?.sceneId || crypto.randomUUID()),
+          sceneJson: node.attrs?.sceneJson || null,
+          elements: scene.elements || [],
+          appState: scene.appState,
+          files: scene.files,
+        },
+        sortOrder: order++,
+      });
+    } else if (node.type === 'callout') {
+      const text = inlineText(node);
+      blocks.push({
+        type: 'callout',
+        props: { text, emoji: String(node.attrs?.emoji || '💡') },
+        sortOrder: order++,
+      });
+    } else if (node.type === 'toggleBlock') {
+      const text = inlineText(node);
+      blocks.push({
+        type: 'toggle',
+        props: { text, open: node.attrs?.open !== false },
+        sortOrder: order++,
+      });
+    } else if (node.type === 'columns') {
+      const columns = (node.content || []).map((col) => inlineText(col));
+      blocks.push({
+        type: 'columns',
+        props: { columns, text: columns.join(' | ') },
+        sortOrder: order++,
+      });
+    } else if (node.type === 'mathBlock') {
+      blocks.push({
+        type: 'math',
+        props: { tex: String(node.attrs?.tex || '') },
+        sortOrder: order++,
+      });
+    } else if (node.type === 'bookmark') {
+      blocks.push({
+        type: 'bookmark',
+        props: {
+          url: String(node.attrs?.url || ''),
+          title: String(node.attrs?.title || ''),
+        },
+        sortOrder: order++,
+      });
     }
   }
 
-  // Drop final empty trailing paragraphs beyond one
   while (
     blocks.length > 1 &&
     blocks[blocks.length - 1].type === 'paragraph' &&

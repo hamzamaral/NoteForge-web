@@ -13,13 +13,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Block, type PageNode } from '@/lib/api';
 import { blocksToDoc, docToBlocks } from '@/lib/blocks';
 import type { NoteForgeProvider } from '@/lib/sync';
+import {
+  BookmarkNode,
+  CalloutNode,
+  ColumnNode,
+  ColumnsNode,
+  DrawingNode,
+  MathNode,
+  ToggleNode,
+} from '@/components/editor/extensions';
 
 const YJS_FIELD = 'default';
 
 function blocksHaveContent(blocks: Block[]) {
   return blocks.some((b) => {
-    if (b.type === 'divider') return true;
-    if (b.type === 'image') return Boolean(b.props.src);
+    if (b.type === 'divider' || b.type === 'drawing' || b.type === 'columns') return true;
+    if (b.type === 'image' || b.type === 'bookmark') return Boolean(b.props.src || b.props.url);
+    if (b.type === 'math') return Boolean(b.props.tex);
     return String(b.props.text ?? '').trim().length > 0;
   });
 }
@@ -56,21 +66,31 @@ const SLASH_ITEMS: SlashItem[] = [
     key: 'callout',
     label: 'Callout',
     hint: '!',
-    run: (ed) => ed.chain().focus().insertContent('💡 ').run(),
+    run: (ed) => ed.chain().focus().insertCallout().run(),
   },
   {
     key: 'toggle',
     label: 'Toggle',
     hint: '▸',
-    run: (ed) =>
-      ed
-        .chain()
-        .focus()
-        .insertContent({
-          type: 'blockquote',
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: '▸ Toggle başlık' }] }],
-        })
-        .run(),
+    run: (ed) => ed.chain().focus().insertToggle().run(),
+  },
+  {
+    key: 'columns',
+    label: 'Kolonlar',
+    hint: '2',
+    run: (ed) => ed.chain().focus().insertColumns().run(),
+  },
+  {
+    key: 'math',
+    label: 'Math',
+    hint: '∑',
+    run: (ed) => ed.chain().focus().insertMath('').run(),
+  },
+  {
+    key: 'bookmark',
+    label: 'Bookmark',
+    hint: 'URL',
+    run: (ed) => ed.chain().focus().insertBookmark().run(),
   },
   { key: 'hr', label: 'Ayırıcı', hint: '---', run: (ed) => ed.chain().focus().setHorizontalRule().run() },
   {
@@ -93,7 +113,7 @@ const SLASH_ITEMS: SlashItem[] = [
     key: 'drawing',
     label: 'Çizim',
     hint: 'Excalidraw',
-    run: (ed) => ed.chain().focus().insertContent(`[çizim:${crypto.randomUUID()}]`).run(),
+    run: (ed) => ed.chain().focus().insertDrawing().run(),
   },
 ];
 
@@ -237,6 +257,13 @@ export function BlockEditor({
         allowBase64: true,
         HTMLAttributes: { class: 'nf-image rounded-lg max-w-full my-3' },
       }),
+      DrawingNode,
+      CalloutNode,
+      ToggleNode,
+      ColumnNode,
+      ColumnsNode,
+      MathNode,
+      BookmarkNode,
       Placeholder.configure({
         placeholder: ({ node }) =>
           node.type.name === 'heading'
