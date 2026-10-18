@@ -41,10 +41,10 @@ A Database is linked 1:1 to a Page. Properties (`text|number|select|date`) and V
 Page shares are token URLs (`/share/:token`) with READ/COMMENT permission — no JWT. Workspace members use OWNER/EDITOR/VIEWER; invite by existing user email; only OWNER removes members. Comments can optionally attach to a `blockId`.
 
 ### How do you handle concurrent edits?
-Optimistic `Page.contentVersion` on PATCH (409 on conflict) remains the durable lock. Live multiplayer: Socket.IO `/sync` requires JWT; each page room keeps an in-memory `Y.Doc`; clients exchange `yjsSync` / `yjsUpdate` + `awarenessUpdate`. TipTap Collaboration + CollaborationCaret show remote carets; REST autosave persists when peers leave.
+Postgres blocks are SoT. Version conflict → remount editor. Yjs is live transport; flush on leave/pagehide. Empty wipe of non-empty pages blocked (400).
 
 ### How does search work?
-`GET /workspaces/:id/search?q=` ranks **title** matches highest, then **task** titles, then **block props** via `props::text ILIKE`. Hits return `match`, `snippet`, `score`. UI: sidebar filter + `Ctrl+K` palette with highlight. Meilisearch deferred (ADR 0003).
+Meilisearch-first + ILIKE fallback; Ctrl+K kind filters; incremental index on save.
 
 ### How is multi-tenant isolation done?
 Every page/task/db row belongs to a `workspaceId`. Guards resolve membership (`WorkspaceMember`) before any mutation. Share links are token-scoped read APIs without JWT.
@@ -56,7 +56,7 @@ First-class **drawing block** (Excalidraw), explicit **task panel** before full 
 Postgres for source of truth; FTS via ILIKE → Meilisearch; files to S3; sync room fan-out per `pageId`; optional Redis adapter for Socket.IO across instances.
 
 ### Security
-JWT access + hashed refresh tokens, helmet, validation pipes, membership checks, sync handshake JWT, public share is read-only.
+JWT, workspace ACL, OWNER-only invite, signed file URLs, trashed shares hidden.
 
 ## English summary
 Portfolio-grade Notion-like system with deliberate phasing: editor → tasks/backlinks → drawing → databases → sharing → realtime → search/showcase.

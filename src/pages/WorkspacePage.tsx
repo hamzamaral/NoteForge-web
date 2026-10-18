@@ -41,6 +41,7 @@ export function WorkspacePage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [auditOpen, setAuditOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [recents, setRecents] = useState(() => getRecents());
   const [navOpen, setNavOpen] = useState(false);
   const mdInputRef = useRef<HTMLInputElement>(null);
@@ -188,6 +189,7 @@ export function WorkspacePage() {
           queryFn: async () => (await api.get<PageDetail>(`/pages/${pageId}`)).data,
         });
         versionRef.current = fresh.contentVersion;
+        setEditorEpoch((n) => n + 1);
         toast.error('Kayıt çakışması — sürüm yenilendi, tekrar yazın');
         return;
       }
@@ -604,6 +606,16 @@ export function WorkspacePage() {
                   ))}
                 </div>
               </div>
+              {(syncStatus === 'error' || syncStatus === 'connecting') && (
+                <div
+                  className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                  role="status"
+                >
+                  {syncStatus === 'error'
+                    ? 'Canlı senkron kopuk — yazmaya devam edebilirsin; kayıt REST ile gider.'
+                    : 'Canlı senkron bağlanıyor…'}
+                </div>
+              )}
               {page.coverUrl && (
                 <div
                   className="mb-3 h-36 w-full overflow-hidden rounded-xl bg-cover bg-center"
@@ -787,20 +799,45 @@ export function WorkspacePage() {
               ) : (
                 <>
                   <BlockEditor
-                    key={page.id}
+                    key={`${page.id}-${editorEpoch}`}
                     blocks={page.blocks}
                     pages={pages}
                     currentPageId={page.id}
                     workspaceId={workspaceId}
                     provider={provider}
                     readOnly={!canEdit}
-                    onChange={(payload) =>
-                      saveBlocks.mutateAsync({
+                    onChange={async (payload) => {
+                      await saveBlocks.mutateAsync({
                         blocks: payload.blocks,
                         links: payload.links,
-                      })
-                    }
+                      });
+                      // Editor todos → task panel (one-way sync)
+                      if (!workspaceId || !pageId || !canEdit) return;
+                      const todos = payload.blocks.filter((b) => b.type === 'todo');
+                      if (!todos.length) return;
+                      try {
+                        const { data: existing } = await api.get<{ title: string }[]>('/tasks', {
+                          params: { workspaceId, pageId },
+                        });
+                        const have = new Set(existing.map((t) => t.title.trim().toLowerCase()));
+                        for (const t of todos) {
+                          const title = String(t.props.text || '').trim();
+                          if (!title || have.has(title.toLowerCase())) continue;
+                          await api.post('/tasks', {
+                            workspaceId,
+                            pageId,
+                            title,
+                            status: t.props.checked ? 'DONE' : 'TODO',
+                          });
+                          have.add(title.toLowerCase());
+                        }
+                        void qc.invalidateQueries({ queryKey: ['tasks'] });
+                      } catch {
+                        /* non-blocking */
+                      }
+                    }}
                     onSaveState={setSaveState}
+                    onOpenPage={(id) => navigate(`/p/${id}`)}
                   />
                   <Comments
                     pageId={page.id}
@@ -853,6 +890,7 @@ export function WorkspacePage() {
             onClose={() => setHistoryOpen(false)}
             onRestored={() => {
               setHistoryOpen(false);
+              setEditorEpoch((n) => n + 1);
               void qc.invalidateQueries({ queryKey: ['page', pageId] });
             }}
           />
@@ -916,6 +954,9 @@ function HistoryModal({
             Kapat
           </button>
         </div>
+        <p className="border-b px-4 py-2 text-[11px] text-slate-500">
+          Snapshot her 5. kayıtta alınır (son 20).
+        </p>
         <ul className="max-h-[55vh] overflow-y-auto p-2">
           {isLoading && <li className="p-3 text-sm text-slate-500">Yükleniyor…</li>}
           {!isLoading && !snaps.length && (

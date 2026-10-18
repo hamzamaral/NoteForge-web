@@ -118,8 +118,16 @@ export class NoteForgeProvider {
     this.listeners.forEach((cb) => cb(true));
   }
 
+  /** Call before destroy so REST SoT can flush (Yjs is transport-only). */
+  beforeLeave?: () => void | Promise<unknown>;
+
   destroy() {
     this.destroyed = true;
+    try {
+      void this.beforeLeave?.();
+    } catch {
+      /* ignore */
+    }
     try {
       this.socket.emit('leavePage');
     } catch {

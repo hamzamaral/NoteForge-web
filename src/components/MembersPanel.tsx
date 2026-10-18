@@ -32,7 +32,7 @@ export function MembersPanel({
   });
 
   const me = members.find((m) => m.user.id === user?.id);
-  const canInvite = me?.role === 'OWNER' || me?.role === 'EDITOR';
+  const canInvite = me?.role === 'OWNER';
 
   const invite = useMutation({
     mutationFn: () =>

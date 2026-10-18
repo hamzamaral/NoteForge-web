@@ -129,6 +129,7 @@ type Props = {
   /** Called after debounce; should return a Promise so UI waits for real save */
   onChange: (payload: ReturnType<typeof docToBlocks>) => void | Promise<unknown>;
   onSaveState?: (state: 'idle' | 'saving' | 'saved' | 'error') => void;
+  onOpenPage?: (pageId: string) => void;
 };
 
 type Popup = {
@@ -150,19 +151,16 @@ async function uploadImageFile(workspaceId: string, file: File): Promise<string>
 }
 
 async function insertImageIntoEditor(ed: Editor, file: File, workspaceId?: string) {
-  if (workspaceId) {
-    try {
-      const url = await uploadImageFile(workspaceId, file);
-      ed.chain().focus().setImage({ src: url, alt: file.name }).run();
-      return;
-    } catch {
-      /* fall through to data URL */
-    }
+  if (!workspaceId) {
+    window.alert('Workspace yok — görsel yüklenemedi');
+    return;
   }
-  const reader = new FileReader();
-  reader.onload = () =>
-    ed.chain().focus().setImage({ src: String(reader.result), alt: file.name }).run();
-  reader.readAsDataURL(file);
+  try {
+    const url = await uploadImageFile(workspaceId, file);
+    ed.chain().focus().setImage({ src: url, alt: file.name }).run();
+  } catch {
+    window.alert('Görsel yüklenemedi — base64 kullanılmıyor (SoT: URL)');
+  }
 }
 
 export function BlockEditor({
@@ -174,6 +172,7 @@ export function BlockEditor({
   readOnly = false,
   onChange,
   onSaveState,
+  onOpenPage,
 }: Props) {
   const [popup, setPopup] = useState<Popup | null>(null);
   const [collabSynced, setCollabSynced] = useState(() => provider?.synced ?? false);
@@ -193,6 +192,8 @@ export function BlockEditor({
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onSaveStateRef = useRef(onSaveState);
+  const onOpenPageRef = useRef(onOpenPage);
+  onOpenPageRef.current = onOpenPage;
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
   useEffect(() => {
@@ -302,6 +303,20 @@ export function BlockEditor({
       editorProps: {
         attributes: {
           class: 'prose prose-slate max-w-none focus:outline-none px-1 min-h-[55vh] cursor-text',
+        },
+        handleClick: (_view, pos) => {
+          const ed = editorRef.current;
+          if (!ed || !onOpenPageRef.current) return false;
+          const from = Math.max(0, pos - 80);
+          const around = ed.state.doc.textBetween(from, Math.min(ed.state.doc.content.size, pos + 80), '\n');
+          const re = /@\[([^\]]+)\]\(([a-f0-9-]{36})\)/gi;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(around))) {
+            const id = m[2];
+            onOpenPageRef.current(id);
+            return true;
+          }
+          return false;
         },
         handlePaste: (_view, event) => {
           const ed = editorRef.current;
@@ -421,21 +436,24 @@ export function BlockEditor({
     onSaveStateRef.current?.('idle');
   }, [editor, collabMode, provider]);
 
-  // Flush pending debounce on leave / unmount
+  // Flush pending debounce on leave / unmount / sync room leave (Postgres SoT)
   useEffect(() => {
     function onLeave() {
       const ed = editorRef.current;
       if (ed) void flushSave(ed);
     }
     window.addEventListener('pagehide', onLeave);
+    window.addEventListener('beforeunload', onLeave);
+    if (provider) provider.beforeLeave = onLeave;
     return () => {
       window.removeEventListener('pagehide', onLeave);
+      window.removeEventListener('beforeunload', onLeave);
+      if (provider && provider.beforeLeave === onLeave) provider.beforeLeave = undefined;
       onLeave();
     };
-  }, []);
+  }, [provider]);
 
-  // Do NOT re-setContent on every save: server assigns new block ids each PATCH
-  // and would wipe in-progress typing. Remount via key={pageId} loads fresh content.
+  // Remount via key={pageId-epoch} after 409 / history restore.
 
   function filterSlash(filter: string) {
     const f = filter.toLowerCase();

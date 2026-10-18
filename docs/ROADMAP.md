@@ -21,5 +21,11 @@
 | 16 | Jest/Vitest/Playwright + CI test gate | ship |
 | 17 | Responsive shell, focus trap, a11y, keyboard help (?) | ship |
 | 18 | Audit UI + share/trash events, ZIP, maintenance, pino | ship |
+| 19 | Flush on leave, editor epoch remount, demo link fix | ship |
+| 20 | Signed uploads UX, OWNER invite UI | ship |
+| 21 | Auto search index (API) + health | ship |
+| 22 | Seed accounts + DEMO.md | ship |
+| 23 | Playwright paths + CI | ship |
+| 24 | Mention click, todo sync, sync banner | ship |
 
-**Bilinçli dışarıda:** prod deploy / domain / CDN / managed hosting.
+**Bilinçli dışarıda:** prod deploy / domain / CDN / managed hosting. See `../DEMO.md`.

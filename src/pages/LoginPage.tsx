@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth';
 import { api, getErrorMessage } from '@/lib/api';
@@ -103,10 +103,7 @@ export function LoginPage() {
           )}
         </div>
         <p className="mt-4 text-center text-xs text-slate-500">
-          Demo: admin@noteforge.local / Admin123! ·{' '}
-          <Link to="/share/demo" className="underline">
-            paylaşım
-          </Link>
+          Demo: admin@noteforge.local / Admin123!
         </p>
       </form>
     </div>
